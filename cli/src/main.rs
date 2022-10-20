@@ -6,7 +6,7 @@ use snarkvm::{
     circuit::AleoV0,
     package::Package,
     prelude::Value,
-    prelude::{Identifier, Testnet3},
+    prelude::{Identifier, Testnet3}, file::{ProverFile, VerifierFile},
 };
 
 #[derive(Debug, Parser)]
@@ -40,8 +40,15 @@ fn main() -> Result<()> {
 
     println!("outputs {:?}", response.outputs());
 
-    // verify the execution
+    let build_dir = package.build_directory();
     let process = package.get_process()?;
+    let prover = ProverFile::open(build_dir.as_path(), &cli.function)?;
+    let verifier = VerifierFile::open(build_dir.as_path(), &cli.function)?;
+
+    let program_id = package.program_id();
+    process.insert_proving_key(program_id, &cli.function, prover.proving_key().clone())?;
+    process.insert_verifying_key(program_id, &cli.function, verifier.verifying_key().clone())?;
+
     process.verify_execution(&execution)?;
 
     // TODO once we get the above working, we need to do the same without assuming local files
