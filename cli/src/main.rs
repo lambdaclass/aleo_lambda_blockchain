@@ -4,9 +4,10 @@ use std::path::PathBuf;
 
 use snarkvm::{
     circuit::AleoV0,
+    file::VerifierFile,
     package::Package,
     prelude::Value,
-    prelude::{Identifier, Testnet3}, file::{ProverFile, VerifierFile},
+    prelude::{Identifier, Testnet3},
 };
 
 #[derive(Debug, Parser)]
@@ -27,7 +28,6 @@ fn main() -> Result<()> {
     let package: Package<Testnet3> = Package::open(cli.path.as_path()).unwrap();
     package.build::<AleoV0>(None)?;
 
-    // is this necessary?
     let rng = &mut rand::thread_rng();
 
     let (response, execution) = package.run::<AleoV0, _>(
@@ -42,11 +42,9 @@ fn main() -> Result<()> {
 
     let build_dir = package.build_directory();
     let process = package.get_process()?;
-    let prover = ProverFile::open(build_dir.as_path(), &cli.function)?;
     let verifier = VerifierFile::open(build_dir.as_path(), &cli.function)?;
 
     let program_id = package.program_id();
-    process.insert_proving_key(program_id, &cli.function, prover.proving_key().clone())?;
     process.insert_verifying_key(program_id, &cli.function, verifier.verifying_key().clone())?;
 
     process.verify_execution(&execution)?;
