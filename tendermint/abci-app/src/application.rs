@@ -174,6 +174,7 @@ impl Application for KeyValueStoreApp {
         }
     }
 
+    // ref: https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/abci.md
     fn check_tx(&self, _request: RequestCheckTx) -> ResponseCheckTx {
         ResponseCheckTx {
             code: 0,

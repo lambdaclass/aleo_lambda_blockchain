@@ -1,7 +1,9 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use bytes::Bytes;
+use clap::Parser;
 use std::net::SocketAddr;
 
+use std::sync::Arc;
 use std::{path::Path, str::FromStr};
 
 use futures::sink::SinkExt as _;
@@ -15,12 +17,24 @@ use snarkvm::{
     prelude::{Identifier, Testnet3},
 };
 
+use tendermint_rpc::{HttpClient, Client};
+
 use log::debug;
 
 use async_trait::async_trait;
 
+
+#[derive(Debug, Parser)]
+struct Cli {
+    /// Defines whether the executable should attempt to send (transaction_id, transaction) to the blockchain after verifying it
+    #[clap(short, long, default_value_t=false)]
+    send_to_blockchain: bool,
+}
+
 #[derive(Clone)]
-struct ExecutionHandler {}
+struct ExecutionHandler {
+    send_to_blockchain: bool,
+}
 
 #[async_trait]
 impl MessageHandler for ExecutionHandler {
@@ -39,8 +53,12 @@ impl MessageHandler for ExecutionHandler {
         debug!("{}", transaction);
 
         // Here we would insert the transaction into the KV Store
-        let _transaction_id = transaction.id().to_string();
+        let transaction_id = transaction.id().to_string();
         // Put(transaction_id, transaction)
+
+        if self.send_to_blockchain {
+            return send_to_blockchain(&transaction_id, transaction).await;
+        }
 
         Ok(())
     }
@@ -51,7 +69,9 @@ async fn main() -> Result<()> {
     let address = "127.0.0.1:6200".parse::<SocketAddr>().unwrap();
     simple_logger::SimpleLogger::new().env().init().unwrap();
 
-    let receiver = Receiver::new(address, ExecutionHandler {});
+    let cli = Cli::parse();
+
+    let receiver = Receiver::new(address, ExecutionHandler {send_to_blockchain: cli.send_to_blockchain});
     receiver.run().await;
 
     Ok(())
@@ -80,3 +100,26 @@ fn verify_execution(
 
     Ok(())
 }
+
+async fn send_to_blockchain(transaction_id: &str, transaction: Transaction<Testnet3>) -> Result<()> {
+    let client = HttpClient::new("http://127.0.0.1:26657")
+    .unwrap();
+
+    // sends a transaction to KV ABCI app in the form of transaction_id=transaction
+    // TODO: transactions should be in a 'codec' module that ABCI app knows about
+    let tx_string = format!("{}={}",transaction_id, transaction);
+    let tx = tx_string.as_bytes().to_owned();
+
+    println!("Sending transaction '{}'", tx_string);
+
+    let response = client
+        .broadcast_tx_sync(tx.into())
+        .await?;
+
+    debug!("Response from CheckTx: {:?}", response);
+    match response.code {
+        tendermint::abci::Code::Ok => Ok(()),
+        tendermint::abci::Code::Err(v) => Err(anyhow!("Transaction failed to validate (CheckTx response status code: {})", v))
+    }
+}
+
