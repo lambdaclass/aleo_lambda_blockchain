@@ -1,0 +1,26 @@
+[package]
+name = "aleo-abci"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.66"
+bytes = { version = "1.0", default-features = false }
+prost = { version = "0.11", default-features = false }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+flex-error = { version = "0.4.4", default-features = false }
+clap = { version = "4.0.5", features = ["derive"] }
+tendermint = "0.25.0"
+tendermint-proto = { version = "0.25.0", default-features = false }
+tendermint-abci = "0.25.0"
+serde = "1.0"
+serde_json = { version = "1.0", features = ["raw_value"] }
+display_json = "0.2.1"
+
+[dependencies.snarkvm]
+git = "https://github.com/Entropy1729/snarkVM.git"
+branch = "testnet3"
+features = ["aleo-cli", "circuit", "console", "parallel", "rest"]

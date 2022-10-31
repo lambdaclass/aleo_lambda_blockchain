@@ -3,7 +3,6 @@ use bytes::Bytes;
 use clap::Parser;
 use std::net::SocketAddr;
 
-use std::sync::Arc;
 use std::{path::Path, str::FromStr};
 
 use futures::sink::SinkExt as _;
@@ -52,12 +51,8 @@ impl MessageHandler for ExecutionHandler {
         let transaction = Transaction::from_execution(execution_struct, None).unwrap();
         debug!("{}", transaction);
 
-        // Here we would insert the transaction into the KV Store
-        let transaction_id = transaction.id().to_string();
-        // Put(transaction_id, transaction)
-
         if self.send_to_blockchain {
-            return send_to_blockchain(&transaction_id, transaction).await;
+            return send_to_blockchain(transaction).await;
         }
 
         Ok(())
@@ -101,13 +96,12 @@ fn verify_execution(
     Ok(())
 }
 
-async fn send_to_blockchain(transaction_id: &str, transaction: Transaction<Testnet3>) -> Result<()> {
+async fn send_to_blockchain(transaction: Transaction<Testnet3>) -> Result<()> {
     let client = HttpClient::new("http://127.0.0.1:26657")
     .unwrap();
 
-    // sends a transaction to KV ABCI app in the form of transaction_id=transaction
     // TODO: transactions should be in a 'codec' module that ABCI app knows about
-    let tx_string = format!("{}={}",transaction_id, transaction);
+    let tx_string = format!("{}",transaction);
     let tx = tx_string.as_bytes().to_owned();
 
     println!("Sending transaction '{}'", tx_string);
