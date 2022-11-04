@@ -1,6 +1,5 @@
 
 use std::{
-    collections::HashMap,
     sync::mpsc::{channel, Receiver, Sender},
 };
 
@@ -73,15 +72,15 @@ use tendermint_abci::Error;
 /// assert_eq!(res.value, "test-value".as_bytes().to_owned());
 /// ```
 #[derive(Debug, Clone)]
-pub struct KeyValueStoreApp {
+pub struct RocksDbKeyValueStoreApp {
     cmd_tx: Sender<Command>,
 }
 
-impl KeyValueStoreApp {
+impl RocksDbKeyValueStoreApp {
     /// Constructor.
-    pub fn new() -> (Self, KeyValueStoreDriver) {
+    pub fn new() -> (Self, RocksDBKeyValueStoreDriver) {
         let (cmd_tx, cmd_rx) = channel();
-        (Self { cmd_tx }, KeyValueStoreDriver::new(cmd_rx))
+        (Self { cmd_tx }, RocksDBKeyValueStoreDriver::new(cmd_rx))
     }
 
     /// Attempt to retrieve the value associated with the given key.
@@ -119,7 +118,7 @@ impl KeyValueStoreApp {
     }
 }
 
-impl Application for KeyValueStoreApp {
+impl Application for RocksDbKeyValueStoreApp {
     fn info(&self, request: RequestInfo) -> ResponseInfo {
         debug!(
             "Got info request. Tendermint version: {}; Block version: {}; P2P version: {}",
@@ -198,6 +197,7 @@ impl Application for KeyValueStoreApp {
             (tx, tx)
         };
         let _ = self.set(key, value).unwrap();
+
         ResponseDeliverTx {
             code: 0,
             data: Default::default(),
@@ -211,7 +211,7 @@ impl Application for KeyValueStoreApp {
                     EventAttribute {
                         key: "key".to_string().into_bytes().into(),
                         value: key.to_string().into_bytes().into(),
-                        index: true,
+                        index: true
                     },
                     EventAttribute {
                         key: "index_key".to_string().into_bytes().into(),
@@ -243,36 +243,60 @@ impl Application for KeyValueStoreApp {
 
 /// Manages key/value store state.
 #[derive(Debug)]
-pub struct KeyValueStoreDriver {
-    store: HashMap<String, String>,
-    height: i64,
+pub struct RocksDBKeyValueStoreDriver {
     app_hash: Vec<u8>,
     cmd_rx: Receiver<Command>,
 }
 
-impl KeyValueStoreDriver {
+const BLOCK_HEIGHT_KEY: &[u8] = b"__max_block_height"; 
+
+impl RocksDBKeyValueStoreDriver {
     fn new(cmd_rx: Receiver<Command>) -> Self {
+        let db = rocksdb::DB::open_default(".db_abci").unwrap();
+
+        let db_block_height = db.get(BLOCK_HEIGHT_KEY).unwrap();
+        
+        // if no block height is found, the database is probably new, 
+        // so we have to insert the key in order for the code to use it
+
+        let last_block_height = if db_block_height.is_none() {
+            let _ = db.put(BLOCK_HEIGHT_KEY, "0");
+            "0".to_string()
+        } else {
+            String::from_utf8(db_block_height.unwrap()).unwrap()
+        };
+
+        // create the app hash based on the last block height found
+
         Self {
-            store: HashMap::new(),
-            height: 0,
-            app_hash: vec![0_u8; MAX_VARINT_LENGTH],
+            app_hash: Self::compute_app_hash(str::parse(&last_block_height).unwrap()),
             cmd_rx,
         }
     }
 
     /// Run the driver in the current thread (blocking).
     pub fn run(mut self) -> Result<(), Error> {
+        let db = rocksdb::DB::open_default(".db_abci").unwrap();
+
         loop {
             let cmd = self.cmd_rx.recv().map_err(Error::channel_recv)?;
+
             match cmd {
                 Command::GetInfo { result_tx } => {
-                    channel_send(&result_tx, (self.height, self.app_hash.clone()))?
+                    let block_height_str = String::from_utf8(db.get(BLOCK_HEIGHT_KEY).unwrap().unwrap()).unwrap();
+                    channel_send(&result_tx, (block_height_str.parse::<i64>().unwrap(), self.app_hash.clone()))?
                 }
                 Command::Get { key, result_tx } => {
                     debug!("Getting value for \"{}\"", key);
+
+                    // very hacky (unwrappy) code
+                    // get value from KV store and send it, along with the block height
+                    let v = db.get(key).unwrap().map(|x| String::from_utf8(x).unwrap());
+                    let block_height_str = String::from_utf8(db.get(BLOCK_HEIGHT_KEY).unwrap().unwrap()).unwrap();
+
                     channel_send(
                         &result_tx,
-                        (self.height, self.store.get(&key).map(Clone::clone)),
+                        (block_height_str.parse::<i64>().unwrap(), v),
                     )?;
                 }
                 Command::Set {
@@ -281,21 +305,38 @@ impl KeyValueStoreDriver {
                     result_tx,
                 } => {
                     debug!("Setting \"{}\" = \"{}\"", key, value);
-                    channel_send(&result_tx, self.store.insert(key, value))?;
+                    let res = db.put(key, &value).and(Ok(Some(value))).unwrap();
+                    channel_send(&result_tx, res)?;
                 }
-                Command::Commit { result_tx } => self.commit(result_tx)?,
+                Command::Commit { result_tx } =>{ // executed with deliver_tx
+                    // get last block height from db and increase it since we are committing the transaction
+                    let block_height_str = String::from_utf8(db.get(BLOCK_HEIGHT_KEY).unwrap().unwrap()).unwrap();
+                    let new_block_height = str::parse::<i64>(&block_height_str).unwrap() + 1;
+
+                    // commit the new block height to the rocks DB store
+                    let _ = db.put(BLOCK_HEIGHT_KEY, &format!("{}", new_block_height));
+
+                    self.commit(result_tx,new_block_height)?
+                },
             }
         }
     }
 
-    fn commit(&mut self, result_tx: Sender<(i64, Vec<u8>)>) -> Result<(), Error> {
-        // As in the Go-based key/value store, simply encode the number of
-        // items as the "app hash"
+    fn commit(&mut self, result_tx: Sender<(i64, Vec<u8>)>, new_block_height: i64) -> Result<(), Error> {
+        // encode the block height as the app hash, which might not be very representative of the state
+        // in the original app, the app hash was the number of items in the set, not the block height
         let mut app_hash = BytesMut::with_capacity(MAX_VARINT_LENGTH);
-        prost::encoding::encode_varint(self.store.len() as u64, &mut app_hash);
-        self.app_hash = app_hash.to_vec();
-        self.height += 1;
-        channel_send(&result_tx, (self.height, self.app_hash.clone()))
+        prost::encoding::encode_varint(new_block_height as u64, &mut app_hash);
+        self.app_hash = Self::compute_app_hash(new_block_height);
+
+        channel_send(&result_tx, (new_block_height, self.app_hash.clone()))
+    }
+
+    fn compute_app_hash(block_height: i64) -> Vec<u8> {
+        let mut app_hash = BytesMut::with_capacity(MAX_VARINT_LENGTH);
+        prost::encoding::encode_varint(block_height as u64, &mut app_hash);
+        
+        app_hash.to_vec()
     }
 }
 

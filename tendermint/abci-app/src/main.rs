@@ -1,9 +1,13 @@
 //! In-memory key/value store application for Tendermint.
 
-use application::KeyValueStoreApp;
+use std::fs;
+
+use application::RocksDbKeyValueStoreApp;
 use clap::Parser;
+use rocksdb::{DBCommon, SingleThreaded};
 use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt};
 use tendermint_abci::{ServerBuilder};
+
 
 mod application;
 
@@ -30,6 +34,10 @@ struct Cli {
     /// Suppress all output logging (overrides --verbose).
     #[clap(short, long)]
     quiet: bool,
+
+    /// Clear db
+    #[clap(short, long)]
+    clear: bool,
 }
 
 fn main() {
@@ -55,7 +63,11 @@ fn main() {
 
     subscriber.init();
 
-    let (app, driver) = KeyValueStoreApp::new();
+    if cli.clear {
+        let _ = fs::remove_dir_all(".db_abci");
+    }
+
+    let (app, driver) = RocksDbKeyValueStoreApp::new();
     let server = ServerBuilder::new(cli.read_buf_size)
         .bind(format!("{}:{}", cli.host, cli.port), app)
         .unwrap();
