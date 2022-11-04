@@ -1,19 +1,12 @@
 use anyhow::{anyhow, Result};
 use bytes::BytesMut;
-use display_json::DisplayAsJson;
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
 use snarkvm::{
     circuit::AleoV0,
-    file::VerifierFile,
-    package::Package,
-    prelude::{Identifier, Testnet3},
+    prelude::{Deployment, Execution, Process, ProgramMemory, ProgramStore, Testnet3},
 };
 use std::{
-    collections::HashMap,
     convert::Into,
-    path::Path,
-    str::FromStr,
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tendermint_abci::Application;
@@ -21,7 +14,7 @@ use tendermint_proto::abci::{
     Event, EventAttribute, RequestCheckTx, RequestDeliverTx, RequestInfo, RequestQuery,
     ResponseCheckTx, ResponseCommit, ResponseDeliverTx, ResponseInfo, ResponseQuery,
 };
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 // NOTE: in the sample app, the following const was defined on one of the internal libraries, but was not `pub`
 // so we had to extract it here
@@ -30,12 +23,10 @@ use tracing::{debug, info};
 /// we're encountering a decoding error for a varint.
 pub const MAX_VARINT_LENGTH: usize = 16;
 
-#[derive(Serialize, Deserialize, DisplayAsJson)]
-struct Transaction<'a> {
-    id: String,
-    r#type: String,
-    #[serde(borrow)]
-    execution: &'a RawValue,
+#[derive(Serialize, Deserialize)]
+enum Transaction {
+    Deployment(String, Deployment<Testnet3>),
+    Execution(String, Execution<Testnet3>),
 }
 
 #[derive(Debug, Clone)]
@@ -50,17 +41,43 @@ impl SnarkVMApp {
         (Self { cmd_tx }, SnarkVMDriver::new(cmd_rx))
     }
 
-    /// Attempt to verify an execution
-    pub fn verify_execution(&self, transaction: &[u8]) -> Result<(i64, Result<()>)> {
-        let tx: Transaction = serde_json::from_str(std::str::from_utf8(transaction)?)?;
-        info!("Verifying Execution: {}", tx.execution.to_string());
+    fn check_transaction(&self, transaction: &[u8]) -> Result<(i64, Result<()>)> {
+        match bincode::deserialize(transaction)? {
+            Transaction::Execution(id, execution) => self.verify_execution(id, execution),
+            Transaction::Deployment(id, deployment) => self.run_deployment(id, deployment),
+        }
+    }
+
+    fn verify_execution(
+        &self,
+        id: String,
+        execution: Execution<Testnet3>,
+    ) -> Result<(i64, Result<()>)> {
+        info!("Verifying Execution: {}", execution.to_string());
         let (result_tx, result_rx) = channel();
         channel_send(
             &self.cmd_tx,
             Command::VerifyExecution {
-                path: "../../hello".to_string(),
-                function: FromStr::from_str("hello")?,
-                execution_json: tx.execution.to_string(),
+                id,
+                execution,
+                result_tx,
+            },
+        )?;
+        channel_recv(&result_rx)
+    }
+
+    fn run_deployment(
+        &self,
+        id: String,
+        deployment: Deployment<Testnet3>,
+    ) -> Result<(i64, Result<()>)> {
+        info!("Running Deployment: {}", deployment.to_string());
+        let (result_tx, result_rx) = channel();
+        channel_send(
+            &self.cmd_tx,
+            Command::RunDeployment {
+                id,
+                deployment,
                 result_tx,
             },
         )?;
@@ -110,7 +127,7 @@ impl Application for SnarkVMApp {
 
     fn check_tx(&self, request: RequestCheckTx) -> ResponseCheckTx {
         info!("Check Tx");
-        match self.verify_execution(&request.tx).unwrap() {
+        match self.check_transaction(&request.tx).unwrap() {
             (_height, Ok(_s)) => ResponseCheckTx {
                 code: 0,
                 data: Vec::default(),
@@ -138,7 +155,7 @@ impl Application for SnarkVMApp {
 
     fn deliver_tx(&self, request: RequestDeliverTx) -> ResponseDeliverTx {
         info!("Deliver Tx");
-        match self.verify_execution(&request.tx).unwrap() {
+        match self.check_transaction(&request.tx).unwrap() {
             (_height, Ok(_s)) => ResponseDeliverTx {
                 code: 0,
                 data: Vec::default(),
@@ -194,9 +211,9 @@ impl Application for SnarkVMApp {
 }
 
 /// Interacts with `snarkVM` state.
-#[derive(Debug)]
 pub struct SnarkVMDriver {
-    store: HashMap<String, String>,
+    store: ProgramStore<Testnet3, ProgramMemory<Testnet3>>,
+    process: Process<Testnet3>,
     height: i64,
     app_hash: Vec<u8>,
     cmd_rx: Receiver<Command>,
@@ -205,7 +222,8 @@ pub struct SnarkVMDriver {
 impl SnarkVMDriver {
     fn new(cmd_rx: Receiver<Command>) -> Self {
         Self {
-            store: HashMap::new(),
+            store: ProgramStore::<_, ProgramMemory<_>>::open(None).unwrap(),
+            process: Process::load().unwrap(),
             height: 0,
             app_hash: vec![0_u8; MAX_VARINT_LENGTH],
             cmd_rx,
@@ -221,18 +239,24 @@ impl SnarkVMDriver {
                     channel_send(&result_tx, (self.height, self.app_hash.clone()))?;
                 }
                 Command::VerifyExecution {
-                    path,
-                    function,
-                    execution_json,
+                    id,
+                    execution,
                     result_tx,
                 } => {
-                    debug!("Verifying \"{}\"", execution_json);
+                    debug!("Verifying \"{}\"", execution.to_string());
                     channel_send(
                         &result_tx,
-                        (
-                            self.height,
-                            Self::verify_execution(&path, function, &execution_json),
-                        ),
+                        (self.height, self.verify_execution(id, execution)),
+                    )?;
+                }
+                Command::RunDeployment {
+                    id,
+                    deployment,
+                    result_tx,
+                } => {
+                    channel_send(
+                        &result_tx,
+                        (self.height, self.run_deployment(id, deployment)),
                     )?;
                 }
                 Command::Commit { result_tx } => self.commit(&result_tx)?,
@@ -240,33 +264,47 @@ impl SnarkVMDriver {
         }
     }
 
-    fn verify_execution(
-        path: &str,
-        function: Identifier<Testnet3>,
-        execution_json: &str,
-    ) -> Result<()> {
-        let program_path = Path::new(&path);
-        let execution = FromStr::from_str(std::str::from_utf8(execution_json.as_bytes())?)?;
+    fn verify_execution(&mut self, id: String, execution: Execution<Testnet3>) -> Result<()> {
+        let transition = execution.peek().unwrap();
+        let program = transition.program_id();
 
-        let package: Package<Testnet3> = Package::open(program_path)?;
-        package.build::<AleoV0>(None)?;
+        info!("Received execution tx id {} program {}", id, program);
 
-        let build_dir = package.build_directory();
-        let process = package.get_process()?;
+        let result = self.process.verify_execution(&execution);
 
-        let verifier = VerifierFile::open(build_dir.as_path(), &function)?;
+        match result {
+            Err(ref e) => error!("Execution verification failed: {}", e),
+            _ => info!("Execution verification successful"),
+        };
+        result
+        // there is a finalize execution but it's not clear that we actually need it
+    }
 
-        let program_id = package.program_id();
-        process.insert_verifying_key(program_id, &function, verifier.verifying_key().clone())?;
+    fn run_deployment(&mut self, id: String, deployment: Deployment<Testnet3>) -> Result<()> {
+        let program = deployment.program_id();
+        info!("Received deployment tx id {} program {}", id, program);
 
-        process.verify_execution(&execution)
+        let rng = &mut rand::thread_rng();
+
+        let result = self
+            .process
+            .verify_deployment::<AleoV0, _>(&deployment, rng);
+        match result {
+            Err(ref e) => error!("Deployment verification failed: {}", e),
+            _ => info!("Deployment verification successful, storing program"),
+        }
+
+        // we run finalize to save the program in the process for later execute verification
+        // it's not clear that we're interested in the store here, but it's required for that function
+        // note we could've use process.load_deployment instead but that one is private
+        self.process.finalize_deployment(&self.store, &deployment)
     }
 
     fn commit(&mut self, result_tx: &Sender<(i64, Vec<u8>)>) -> Result<()> {
         // As in the Go-based key/value store, simply encode the number of
         // items as the "app hash"
-        let mut app_hash = BytesMut::with_capacity(MAX_VARINT_LENGTH);
-        prost::encoding::encode_varint(self.store.len() as u64, &mut app_hash);
+        let app_hash = BytesMut::with_capacity(MAX_VARINT_LENGTH);
+        //prost::encoding::encode_varint(self.store.len() as u64, &mut app_hash);
         self.app_hash = app_hash.to_vec();
         self.height += 1;
         channel_send(result_tx, (self.height, self.app_hash.clone()))
@@ -279,9 +317,13 @@ enum Command {
     GetInfo { result_tx: Sender<(i64, Vec<u8>)> },
     /// Verify the execution of a program.
     VerifyExecution {
-        path: String,
-        function: Identifier<Testnet3>,
-        execution_json: String,
+        id: String,
+        execution: Execution<Testnet3>,
+        result_tx: Sender<(i64, Result<()>)>,
+    },
+    RunDeployment {
+        id: String,
+        deployment: Deployment<Testnet3>,
         result_tx: Sender<(i64, Result<()>)>,
     },
     /// Commit the current state of the application, which involves recomputing
