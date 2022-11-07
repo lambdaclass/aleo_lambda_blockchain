@@ -41,7 +41,7 @@ And then both terminals should start to exchange messages and `Commited height` 
 On a third terminal, run the client app to deploy an aleo program:
 
 ```shell
-cargo run --release -- deploy aleo/hello
+cargo run --release -- program deploy aleo/hello
 ```
 
 That should take some time to create the deployment transaction and send it to tendermint. In the client terminal you should see something like:
@@ -93,7 +93,7 @@ and the rest of the transaction.
 Finally to execute a program (locally) and send the execution transaction (with its proof) run in client terminal:
 
 ```shell
-cargo run --release -- run aleo/hello hello 1u32 1u32
+cargo run --release -- program execute aleo/hello hello 1u32 1u32
 ```
 which will run the program and send the execution to the blockchain:
 

@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use commands::{Command, Program};
 use lib::Transaction;
 use log::info;
 use snarkvm::prelude::Process;
@@ -9,34 +10,17 @@ use snarkvm::{
     prelude::Value,
     prelude::{Identifier, Testnet3},
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tendermint_rpc::{Client, HttpClient};
+
+mod commands;
 
 #[derive(Debug, Parser)]
 #[clap()]
-pub enum Command {
-    // user-generated commands
-    Deploy {
-        #[clap(value_parser)]
-        path: PathBuf,
-    },
-
-    Run {
-        #[clap(value_parser)]
-        path: PathBuf,
-
-        #[clap(value_parser)]
-        function: Identifier<Testnet3>,
-
-        #[clap(value_parser)]
-        inputs: Vec<Value<Testnet3>>,
-    },
-}
-
-#[derive(Debug, Parser)]
 pub struct Cli {
+    /// Specify a subcommand.
     #[clap(subcommand)]
-    command: Command,
+    pub command: Command,
 }
 
 #[tokio::main()]
@@ -45,12 +29,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let transaction = match cli.command {
-        Command::Deploy { path } => generate_deployment(&path)?,
-        Command::Run {
+        Command::Program(Program::Deploy { path }) => generate_deployment(&path)?,
+        Command::Program(Program::Execute {
             path,
             function,
             inputs,
-        } => generate_execution(&path, function, &inputs)?,
+        }) => generate_execution(&path, function, &inputs)?,
+        _ => todo!("Command has not been implemented yet"),
     };
 
     send_to_blockchain(&transaction).await
