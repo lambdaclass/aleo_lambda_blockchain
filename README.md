@@ -1,20 +1,136 @@
 # Aleo Consensus
-MVPs for an aleo blockchain
+MVP for an aleo blockchain
 
-## Prover and Verifier
+## Tendermint app
 
-You can run a `Verifier` server that listens on port 6200 for executions, deserializes them and verifies them with
+Current status is set to be run in a Tendermint environment
+
+## Requirements
+
+- Rust
+- [Tendermint Core](https://github.com/tendermint/tendermint)
+
+## Setup
+
+Follow [tendermint install instructions](https://github.com/tendermint/tendermint/blob/main/docs/introduction/install.md) from source code. Be sure to checkout version `0.34.x` as current rust abci implementation does not support `0.35.0` (`0.35.0` has not been released yet)
+
+## Running a single tendermint node
+
+Run `snarkvm_abci`:
+
+```shell
+cargo run --release --bin snarkvm_abci
+```
+
+This will have our ABCI app running and ready to connect to a tendermint node:
 
 ```
-cd verifier
-cargo run --release
+2022-11-07T20:32:21.577768Z  INFO ThreadId(01) ABCI server running at 127.0.0.1:26658
 ```
 
-With the Verifier running, there is a `Prover` CLI that executes a program and sends the resulting execution to the Verifier. To run it:
+In another terminal run the tendermint node:
+
+```shell
+tendermint node
+```
+
+And then both terminals should start to exchange messages and `Commited height` should start to grow.
+
+## Sending deploys and executions to tendermint.
+
+On a third terminal, run the client app to deploy an aleo program:
+
+```shell
+cargo run --release -- deploy aleo/hello
+```
+
+That should take some time to create the deployment transaction and send it to tendermint. In the client terminal you should see something like:
 
 ```
-cd prover
-cargo run --release -- ../hello hello 1u32 1u32
+2022-11-07T20:37:19.377Z INFO [client] Deploying program program hello.aleo;
+
+function hello:
+    input r0 as u32.public;
+    input r1 as u32.private;
+    add r0 r1 into r2;
+    output r2 as u32.private;
+
+ • Loaded universal setup (in 1793 ms)
+ • Built 'hello' (in 6363 ms)
+ • Certified 'hello': 147 ms
+2022-11-07T20:37:32.973Z DEBUG [tendermint_rpc::client::transport::http::sealed] Outgoing request: {
+  "jsonrpc": "2.0",
+  "id": "c45e1f52-a9f1-414e-ab2c-8b02746ee349",
+  "method": "broadcast_tx_sync",
+  "params": {
+    "tx": "AAAAACQAAAAAAAAANTZhZ...
+```
+And a very long encoded transaction. Finally something like
+
+```
+2022-11-07T20:37:33.922Z DEBUG [tendermint_rpc::client::transport::http::sealed] Incoming response: {
+  "jsonrpc": "2.0",
+  "id": "c45e1f52-a9f1-414e-ab2c-8b02746ee349",
+  "result": {
+    "code": 0,
+    "data": "",
+    "log": "",
+    "codespace": "",
+    "hash": "6A58F82922F436ECF8765F7AEF90AC79BE8091A7D5AF14C121326DB5533A9339"
+  }
+}
 ```
 
-Currently the program and function being executed are hardcoded to be the `hello` function in `hello.aleo`.
+With a code 0 meaning the program was successfully deployed. You should also see the transaction being received in the ABCI terminal with some message like:
+
+```
+2022-11-07T20:36:49.862776Z  INFO ThreadId(65) Check Tx
+2022-11-07T20:36:49.868743Z  INFO ThreadId(65) Verifying Execution: {"edition":0,"transitions":[{"id":"as1n0tlsr9rglamwr9tcqxf60ndpgkvhu83py79t78808w2vx95tv9q2ataeg","program":"hello.aleo","function":"hello","inputs":[{"type":"public","id":"1478829010713049050956129212113341334476706503997215127720201268298504260669field","value":"1u32"},{"type":"private","id":"375755831552960522697901416301536744612216033684938328198044587457082215962field","value":"ciphertext1qyq0lmjlsmwjwxxuxft5vw24pqj70fv76pj2q8a96m37mpyqregxzrge629d3"}],"outputs":[{"type":"private","id":"567543593766656021073803866365676200751324568935625558453747354077101654776field","value":"ciphertext1qyq265hx4fqu0edg8rdlwl44vatns7jwtn4hksfpylma3h3nm7rrxpcew67q6"}],"proof":"proof1qqqqzqqqqqqqqqqqm2uje400mwxc56umrwqj8jfefxnfnplgtcl7gc9kq68rxwnfzk...
+```
+and the rest of the transaction.
+
+
+Finally to execute a program (locally) and send the execution transaction (with its proof) run in client terminal:
+
+```shell
+cargo run --release -- run aleo/hello hello 1u32 1u32
+```
+which will run the program and send the execution to the blockchain:
+
+```
+2022-11-07T20:44:07.702Z INFO [client] executing program hello.aleo function hello inputs [1u32, 1u32]
+🚀 Executing 'hello.aleo/hello'...
+
+ • Executing 'hello.aleo/hello'...
+ • Executed 'hello' (in 1151 ms)
+2022-11-07T20:44:15.817Z INFO [client] outputs [2u32]
+2022-11-07T20:44:15.817Z DEBUG [tendermint_rpc::client::transport::http::sealed] Outgoing request: {
+  "jsonrpc": "2.0",
+  "id": "3a45b4de-db1a-4d8a-a23c-dbe6180003f5",
+  "method": "broadcast_tx_sync",
+  "params": {
+    "tx": "AQAAACQAAAAAAAAAY2RkNTNlZjktM2I5Zi00N...
+```
+and finally
+```
+2022-11-07T20:44:15.830Z DEBUG [tendermint_rpc::client::transport::http::sealed] Incoming response: {
+  "jsonrpc": "2.0",
+  "id": "3a45b4de-db1a-4d8a-a23c-dbe6180003f5",
+  "result": {
+    "code": 0,
+    "data": "",
+    "log": "",
+    "codespace": "",
+    "hash": "51943117E73DC0521E0502795ADD8DC1A40856342E5A9F6516E0ECCDC66E0B13"
+  }
+}
+```
+with the success response.
+
+After each execution, tendermint node may be left in an invalid state. If that's the case run:
+
+```shell
+tendermint unsafe_reset_all
+```
+
+to restore the initial state.
