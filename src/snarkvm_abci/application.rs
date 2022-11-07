@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use bytes::BytesMut;
-use serde::{Deserialize, Serialize};
+use lib::Transaction;
 use snarkvm::{
     circuit::AleoV0,
     prelude::{Deployment, Execution, Process, ProgramMemory, ProgramStore, Testnet3},
@@ -22,12 +22,6 @@ use tracing::{debug, error, info};
 /// The maximum number of bytes we expect in a varint. We use this to check if
 /// we're encountering a decoding error for a varint.
 pub const MAX_VARINT_LENGTH: usize = 16;
-
-#[derive(Serialize, Deserialize)]
-enum Transaction {
-    Deployment(String, Deployment<Testnet3>),
-    Execution(String, Execution<Testnet3>),
-}
 
 #[derive(Debug, Clone)]
 pub struct SnarkVMApp {

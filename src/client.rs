@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use lib::Transaction;
 use log::info;
-use serde::Serialize;
-use snarkvm::prelude::{Deployment, Execution, Process};
+use snarkvm::prelude::Process;
 use snarkvm::{
     circuit::AleoV0,
     package::Package,
@@ -37,13 +37,6 @@ pub enum Command {
 pub struct Cli {
     #[clap(subcommand)]
     command: Command,
-}
-
-// FIXME this will be duplicated for now
-#[derive(Serialize, Debug)]
-enum Transaction {
-    Deployment(String, Deployment<Testnet3>),
-    Execution(String, Execution<Testnet3>),
 }
 
 #[tokio::main()]
