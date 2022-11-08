@@ -1,16 +1,17 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use commands::{Command, Program};
 use lib::Transaction;
 use log::info;
-use snarkvm::prelude::Process;
+use snarkvm::prelude::{PrivateKey, Process};
 use snarkvm::{
     circuit::AleoV0,
-    package::Package,
     prelude::Value,
     prelude::{Identifier, Testnet3},
 };
+use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 use tendermint_rpc::{Client, HttpClient};
 
 mod commands;
@@ -34,7 +35,8 @@ async fn main() -> Result<()> {
             path,
             function,
             inputs,
-        }) => generate_execution(&path, function, &inputs)?,
+            private_key,
+        }) => generate_execution(&path, function, &inputs, &private_key)?,
         _ => todo!("Command has not been implemented yet"),
     };
 
@@ -42,8 +44,9 @@ async fn main() -> Result<()> {
 }
 
 fn generate_deployment(path: &Path) -> Result<Transaction> {
-    let package: Package<Testnet3> = Package::open(path)?;
-    let program = package.program();
+    let program_string = fs::read_to_string(path).unwrap();
+    let program = snarkvm::prelude::Program::from_str(&program_string).unwrap();
+
     let rng = &mut rand::thread_rng();
 
     info!("Deploying program {}", program);
@@ -53,7 +56,7 @@ fn generate_deployment(path: &Path) -> Result<Transaction> {
 
     // for some reason a new process is needed, the package current one would fail
     let process = Process::<Testnet3>::load()?;
-    let deployment = process.deploy::<AleoV0, _>(program, rng)?;
+    let deployment = process.deploy::<AleoV0, _>(&program, rng)?;
 
     // using a uuid for txid, just to skip having to use an additional fee record which now is necessary to run
     // Transaction::from_deployment
@@ -62,29 +65,39 @@ fn generate_deployment(path: &Path) -> Result<Transaction> {
     Ok(Transaction::Deployment(transaction_id, deployment))
 }
 
+// TODO move the low level SnarkVM stuff to a helper vm module
 fn generate_execution(
     path: &Path,
-    function: Identifier<Testnet3>,
+    function_name: Identifier<Testnet3>,
     inputs: &[Value<Testnet3>],
+    private_key: &PrivateKey<Testnet3>,
 ) -> Result<Transaction> {
-    let package: Package<Testnet3> = Package::open(path).unwrap();
-    package.build::<AleoV0>(None)?;
-
     let rng = &mut rand::thread_rng();
+    let program_string = fs::read_to_string(path).unwrap();
+    let program = snarkvm::prelude::Program::from_str(&program_string).unwrap();
+    let program_id = program.id();
 
-    let program = package.program_id();
+    if !program.contains_function(&function_name) {
+        bail!("Function '{function_name}' does not exist.")
+    }
+
+    let mut process = Process::<Testnet3>::load()?;
+    process.add_program(&program).unwrap();
+
+    // Synthesize each proving and verifying key.
+    for function_name in program.functions().keys() {
+        process.synthesize_key::<AleoV0, _>(program_id, function_name, &mut rand::thread_rng())?
+    }
+
     info!(
         "executing program {} function {} inputs {:?}",
-        program, function, inputs
+        program, function_name, inputs
     );
 
-    let (response, execution) = package.run::<AleoV0, _>(
-        None,
-        package.manifest_file().development_private_key(),
-        function,
-        inputs,
-        rng,
-    )?;
+    // Execute the circuit.
+    let authorization =
+        process.authorize::<AleoV0, _>(private_key, program_id, function_name, inputs, rng)?;
+    let (response, execution) = process.execute::<AleoV0, _>(authorization, rng)?;
 
     info!("outputs {:?}", response.outputs());
 

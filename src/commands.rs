@@ -1,6 +1,5 @@
-use anyhow::Result;
 use clap::Parser;
-use snarkvm::prelude::{Address, Identifier, Testnet3, Value, ViewKey};
+use snarkvm::prelude::{Address, Identifier, PrivateKey, Testnet3, Value, ViewKey};
 use std::path::PathBuf;
 
 /// Commands to manage accounts.
@@ -45,7 +44,7 @@ pub enum Account {
 pub enum Program {
     /// Builds and sends a deployment transaction to the Blockchain, returning the Transaction ID
     Deploy {
-        /// Path where the package resides.
+        /// Path where the aleo program file resides.
         #[clap(value_parser)]
         path: PathBuf,
     },
@@ -60,6 +59,9 @@ pub enum Program {
         /// The function inputs.
         #[clap(value_parser)]
         inputs: Vec<Value<Testnet3>>,
+        /// Account private key necessary to authorize the execution transaction
+        #[clap(value_parser)]
+        private_key: PrivateKey<Testnet3>,
     },
 }
 
@@ -80,13 +82,4 @@ pub enum Command {
     Program(Program),
     #[clap(name = "get")]
     Get(Get),
-}
-
-impl Command {
-    /// Parses the command.
-    pub fn parse(self) -> Result<String> {
-        match self {
-            _ => todo!("Parsing for this command has yet to be implemented"),
-        }
-    }
 }
