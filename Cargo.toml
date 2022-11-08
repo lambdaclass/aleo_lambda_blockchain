@@ -38,8 +38,9 @@ tokio = { version = "1.15.0", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1.2.1", features = ["v4"] }
+dirs = "4.0.0"
 
 [dependencies.snarkvm]
 git = "https://github.com/Entropy1729/snarkVM.git"
-branch = "testnet3"
+branch = "local_params"
 features = ["aleo-cli", "circuit", "console", "parallel", "rest"]

@@ -1,19 +1,20 @@
 use anyhow::{anyhow, bail, Result};
 use clap::Parser;
-use commands::{Command, Program};
+use commands::{Account, Command, Program};
 use lib::Transaction;
 use log::info;
-use snarkvm::prelude::{PrivateKey, Process};
+use snarkvm::prelude::Process;
 use snarkvm::{
     circuit::AleoV0,
     prelude::Value,
     prelude::{Identifier, Testnet3},
 };
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tendermint_rpc::{Client, HttpClient};
 
+mod account;
 mod commands;
 
 #[derive(Debug, Parser)]
@@ -21,7 +22,11 @@ mod commands;
 pub struct Cli {
     /// Specify a subcommand.
     #[clap(subcommand)]
-    pub command: Command,
+    command: Command,
+
+    /// The account credentials file.
+    #[clap(short, long, global = true)]
+    file: Option<PathBuf>,
 }
 
 #[tokio::main()]
@@ -29,18 +34,29 @@ async fn main() -> Result<()> {
     simple_logger::SimpleLogger::new().env().init().unwrap();
     let cli = Cli::parse();
 
-    let transaction = match cli.command {
-        Command::Program(Program::Deploy { path }) => generate_deployment(&path)?,
+    match cli.command {
+        Command::Account(Account::New) => {
+            let account = account::Credentials::new()?;
+            account.save(cli.file)?
+        }
+        Command::Program(Program::Deploy { path }) => {
+            let transaction = generate_deployment(&path)?;
+            send_to_blockchain(&transaction).await?;
+        }
         Command::Program(Program::Execute {
             path,
             function,
             inputs,
-            private_key,
-        }) => generate_execution(&path, function, &inputs, &private_key)?,
+        }) => {
+            let credentials = account::Credentials::load(cli.file)
+                .map_err(|_| anyhow!("credentials not found"))?;
+            let transaction = generate_execution(&path, function, &inputs, &credentials)?;
+            send_to_blockchain(&transaction).await?;
+        }
         _ => todo!("Command has not been implemented yet"),
     };
 
-    send_to_blockchain(&transaction).await
+    Ok(())
 }
 
 fn generate_deployment(path: &Path) -> Result<Transaction> {
@@ -70,7 +86,7 @@ fn generate_execution(
     path: &Path,
     function_name: Identifier<Testnet3>,
     inputs: &[Value<Testnet3>],
-    private_key: &PrivateKey<Testnet3>,
+    credentials: &account::Credentials,
 ) -> Result<Transaction> {
     let rng = &mut rand::thread_rng();
     let program_string = fs::read_to_string(path).unwrap();
@@ -95,8 +111,13 @@ fn generate_execution(
     );
 
     // Execute the circuit.
-    let authorization =
-        process.authorize::<AleoV0, _>(private_key, program_id, function_name, inputs, rng)?;
+    let authorization = process.authorize::<AleoV0, _>(
+        &credentials.private_key,
+        program_id,
+        function_name,
+        inputs,
+        rng,
+    )?;
     let (response, execution) = process.execute::<AleoV0, _>(authorization, rng)?;
 
     info!("outputs {:?}", response.outputs());

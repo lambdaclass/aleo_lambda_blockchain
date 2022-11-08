@@ -1,28 +1,16 @@
 use clap::Parser;
-use snarkvm::prelude::{Address, Identifier, PrivateKey, Testnet3, Value, ViewKey};
+use snarkvm::prelude::{Address, Identifier, Testnet3, Value};
 use std::path::PathBuf;
 
 /// Commands to manage accounts.
 #[derive(Debug, Parser)]
 pub enum Account {
     /// Generates a new account.
-    New {
-        /// Seed the RNG with a numeric value.
-        #[clap(value_parser, short, long)]
-        seed: Option<u64>,
-    },
+    New,
     /// Fetches the records owned by the given account.
-    Records {
-        /// The view key of the account from which the records are fetched.
-        #[clap(short, long)]
-        view_key: ViewKey<Testnet3>,
-    },
+    Records,
     /// Fetches the records owned by the given account and calculates the final credits balance.
-    Balance {
-        /// The view key of the account from which the records are fetched
-        #[clap(short, long)]
-        view_key: ViewKey<Testnet3>,
-    },
+    Balance,
     /// Commits an execution transaction to send a determined amount of credits to another account.
     Transfer {
         /// Account to which the credits will be transferred.
@@ -59,9 +47,6 @@ pub enum Program {
         /// The function inputs.
         #[clap(value_parser)]
         inputs: Vec<Value<Testnet3>>,
-        /// Account private key necessary to authorize the execution transaction
-        #[clap(value_parser)]
-        private_key: PrivateKey<Testnet3>,
     },
 }
 
