@@ -56,7 +56,7 @@ pub enum Program {
 pub struct Get {
     /// Transaction ID from which to retrieve information
     #[clap(value_parser)]
-    transaction_id: PathBuf,
+    pub transaction_id: String,
 }
 
 #[derive(Debug, Parser)]

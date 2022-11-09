@@ -22,7 +22,7 @@ bin/tendermint:
 # Run a tendermint node, installing it if necessary
 node: bin/tendermint
 	bin/tendermint init
-	bin/tendermint node
+	bin/tendermint node --consensus.create_empty_blocks_interval="8s"
 
 # remove the blockchain data
 reset: bin/tendermint

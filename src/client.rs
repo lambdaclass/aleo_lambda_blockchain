@@ -1,21 +1,24 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Result, ensure};
 use clap::Parser;
-use commands::{Account, Command, Program};
+use commands::{Command, Program, Get, Account};
 use lib::Transaction;
-use log::info;
-use snarkvm::prelude::Process;
+use log::{info, debug};
+use snarkvm::prelude::{Process};
 use snarkvm::{
     circuit::AleoV0,
     prelude::Value,
     prelude::{Identifier, Testnet3},
 };
+use tendermint_rpc::query::{Query};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use tendermint_rpc::{Client, HttpClient};
+use tendermint_rpc::{Client, HttpClient, Order};
 
 mod account;
 mod commands;
+
+const BLOCKCHAIN_URL: &str = "http://127.0.0.1:26657";
 
 #[derive(Debug, Parser)]
 #[clap()]
@@ -27,6 +30,10 @@ pub struct Cli {
     /// The account credentials file.
     #[clap(short, long, global = true)]
     file: Option<PathBuf>,
+
+    /// Whether to output results as JSON
+    #[clap(value_parser, long, short, default_value_t = false)]
+    pub json: bool,
 }
 
 #[tokio::main()]
@@ -41,7 +48,7 @@ async fn main() -> Result<()> {
         }
         Command::Program(Program::Deploy { path }) => {
             let transaction = generate_deployment(&path)?;
-            send_to_blockchain(&transaction).await?;
+            broadcast_to_blockchain(&transaction).await?;
         }
         Command::Program(Program::Execute {
             path,
@@ -50,13 +57,42 @@ async fn main() -> Result<()> {
         }) => {
             let credentials = account::Credentials::load(cli.file)
                 .map_err(|_| anyhow!("credentials not found"))?;
+
             let transaction = generate_execution(&path, function, &inputs, &credentials)?;
-            send_to_blockchain(&transaction).await?;
+            broadcast_to_blockchain(&transaction).await?;
+        }
+        Command::Get(Get { transaction_id }) => {
+            let tx = get_transaction(&transaction_id).await?;
+            
+            if cli.json {
+                println!("{}",serde_json::to_string(&tx).unwrap());
+            } else {
+                println!("{:?}", tx);
+            }
         }
         _ => todo!("Command has not been implemented yet"),
     };
 
+
     Ok(())
+}
+
+async fn get_transaction(tx_id: &str) -> Result<Transaction>{
+    let client = HttpClient::new(BLOCKCHAIN_URL)?;
+    // todo: this index key might have to be a part of the shared lib so that both the CLI and the ABCI can be in sync
+    let query = Query::contains("app.tx_id", tx_id);
+    
+    let response = client
+        .tx_search(query, false, 1, 1, Order::Ascending)
+        .await?;
+
+    // early return with error if no transaction has been indexed for that tx id
+    ensure!(response.total_count > 0, "Transaction ID is invalid or has not yet been committed to the blockchain");
+
+    let tx_bytes: Vec<u8> = response.txs.into_iter().next().unwrap().tx.into();
+    let transaction: Transaction = bincode::deserialize(&tx_bytes)?;
+
+    Ok(transaction)
 }
 
 fn generate_deployment(path: &Path) -> Result<Transaction> {
@@ -120,7 +156,7 @@ fn generate_execution(
     )?;
     let (response, execution) = process.execute::<AleoV0, _>(authorization, rng)?;
 
-    info!("outputs {:?}", response.outputs());
+    debug!("outputs {:?}", response.outputs());
 
     // using uuid here too for consistency, although in the case of Transaction::from_execution the additional fee is optional
     let transaction_id = uuid::Uuid::new_v4().to_string();
@@ -128,20 +164,18 @@ fn generate_execution(
     Ok(Transaction::Execution(transaction_id, execution))
 }
 
-async fn send_to_blockchain(transaction: &Transaction) -> Result<()> {
+async fn broadcast_to_blockchain(transaction: &Transaction) -> Result<()> {
     let transaction_serialized = bincode::serialize(&transaction).unwrap();
 
-    let client = HttpClient::new("http://127.0.0.1:26657").unwrap();
+    let client = HttpClient::new(BLOCKCHAIN_URL).unwrap();
 
-    // TODO: transactions should be in a 'codec' module that ABCI app knows about
-    //let tx_string = format!("{:?}",transaction);
-    //let tx = tx_string.as_bytes().to_owned();
+    println!("Transaction ID: {}", transaction.id());
 
     let response = client
         .broadcast_tx_sync(transaction_serialized.into())
         .await?;
 
-    info!("Response from CheckTx: {:?}", response);
+    debug!("Response from CheckTx: {:?}", response);
     match response.code {
         tendermint::abci::Code::Ok => Ok(()),
         tendermint::abci::Code::Err(v) => Err(anyhow!(

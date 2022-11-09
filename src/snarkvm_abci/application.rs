@@ -149,8 +149,11 @@ impl Application for SnarkVMApp {
 
     fn deliver_tx(&self, request: RequestDeliverTx) -> ResponseDeliverTx {
         info!("Deliver Tx");
+
+        let tx: Transaction = bincode::deserialize(&request.tx).unwrap();
+
         match self.check_transaction(&request.tx).unwrap() {
-            (_height, Ok(_s)) => ResponseDeliverTx {
+            (_height, Ok(_)) => ResponseDeliverTx {
                 code: 0,
                 data: Vec::default(),
                 log: "".to_string(),
@@ -159,23 +162,11 @@ impl Application for SnarkVMApp {
                 gas_used: 0,
                 events: vec![Event {
                     r#type: "app".to_string(),
-                    attributes: vec![
-                        EventAttribute {
-                            key: "key".to_string().into_bytes(),
-                            value: "key".to_string().into_bytes(),
-                            index: true,
-                        },
-                        EventAttribute {
-                            key: "index_key".to_string().into_bytes(),
-                            value: "index is working".to_string().into_bytes(),
-                            index: true,
-                        },
-                        EventAttribute {
-                            key: "noindex_key".to_string().into_bytes(),
-                            value: "index is working".to_string().into_bytes(),
-                            index: false,
-                        },
-                    ],
+                    attributes: vec![EventAttribute {
+                        key: "tx_id".to_string().into_bytes(),
+                        value: tx.id().to_string().into_bytes(),
+                        index: true,
+                    }],
                 }],
                 codespace: "".to_string(),
             },

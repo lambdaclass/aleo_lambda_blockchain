@@ -48,7 +48,7 @@ Create an aleo account:
 This will generate an account address and the credentials necessary to generate execution proofs. Now run the client app to deploy an aleo program:
 
 ```shell
-bin/aleo program deploy aleo/hello.main
+bin/aleo program deploy aleo/hello.aleo
 ```
 
 That should take some time to create the deployment transaction and send it to tendermint. In the client terminal you should see something like:
