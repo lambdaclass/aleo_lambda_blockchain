@@ -42,5 +42,5 @@ dirs = "4.0.0"
 
 [dependencies.snarkvm]
 git = "https://github.com/Entropy1729/snarkVM.git"
-branch = "local_params"
+branch = "testnet3"
 features = ["aleo-cli", "circuit", "console", "parallel", "rest"]
