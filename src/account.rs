@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use log::info;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use snarkvm::prelude::Testnet3;
 use snarkvm::prelude::{Address, PrivateKey, ViewKey};
@@ -26,14 +26,14 @@ impl Credentials {
         })
     }
 
-    pub fn save(&self, file: Option<PathBuf>) -> Result<()> {
+    pub fn save(&self, file: Option<PathBuf>) -> Result<PathBuf> {
         let file = file.unwrap_or_else(Self::default_file);
         let dir = file.parent().unwrap();
         fs::create_dir_all(dir)?;
-        info!("Saving credentials to {}", file.to_string_lossy());
+        debug!("Saving credentials to {}", file.to_string_lossy());
         let account_json = serde_json::to_string(&self)?;
-        fs::write(file, account_json)?;
-        Ok(())
+        fs::write(file.clone(), account_json)?;
+        Ok(file)
     }
 
     pub fn load(file: Option<PathBuf>) -> Result<Self> {

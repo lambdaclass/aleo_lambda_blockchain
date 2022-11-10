@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 default-run = "client"
 
+[profile.test]
+# use optimizations even in testing, otherwise snarkvm makes it too slow
+opt-level = 3
+debug-assertions = true
+
 [lib]
 path = "src/lib.rs"
 doctest = false
@@ -43,4 +48,9 @@ dirs = "4.0.0"
 [dependencies.snarkvm]
 git = "https://github.com/Entropy1729/snarkVM.git"
 branch = "testnet3"
-features = ["aleo-cli", "circuit", "console", "parallel", "rest"]
+features = ["circuit", "console", "parallel"]
+
+[dev-dependencies]
+assert_fs = "1.0.9"
+assert_cmd = "2.0.6"
+retry = "2.0.0"

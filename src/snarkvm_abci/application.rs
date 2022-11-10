@@ -37,8 +37,8 @@ impl SnarkVMApp {
 
     fn check_transaction(&self, transaction: &[u8]) -> Result<(i64, Result<()>)> {
         match bincode::deserialize(transaction)? {
-            Transaction::Execution(id, execution) => self.verify_execution(id, execution),
-            Transaction::Deployment(id, deployment) => self.run_deployment(id, deployment),
+            Transaction::Execution { id, execution } => self.verify_execution(id, execution),
+            Transaction::Deployment { id, deployment } => self.run_deployment(id, deployment),
         }
     }
 
@@ -47,7 +47,11 @@ impl SnarkVMApp {
         id: String,
         execution: Execution<Testnet3>,
     ) -> Result<(i64, Result<()>)> {
-        info!("Verifying Execution: {}", execution.to_string());
+        info!(
+            "Verifying Execution: {} {}",
+            id,
+            execution.peek().unwrap().program_id()
+        );
         let (result_tx, result_rx) = channel();
         channel_send(
             &self.cmd_tx,
@@ -65,7 +69,7 @@ impl SnarkVMApp {
         id: String,
         deployment: Deployment<Testnet3>,
     ) -> Result<(i64, Result<()>)> {
-        info!("Running Deployment: {}", deployment.to_string());
+        info!("Running Deployment: {} {}", id, deployment.program_id());
         let (result_tx, result_rx) = channel();
         channel_send(
             &self.cmd_tx,
