@@ -19,16 +19,15 @@ fn basic_program() {
         .success();
     let transaction: Transaction = parse_output(result);
 
-    // FIXME deployment transactions apparently don't get saved
-    // // get deployment tx, need to retry until it gets committed
-    // let result = retry::retry(Fixed::from_millis(100).take(5), || {
-    //     Command::cargo_bin("client")
-    //         .unwrap()
-    //         .args(&["get", &transaction.id(), "-f", &account])
-    //         .assert()
-    //         .try_success()
-    // });
-    // assert!(result.is_ok());
+    // get deployment tx, need to retry until it gets committed
+    let result = retry::retry(Fixed::from_millis(1000).take(5), || {
+        Command::cargo_bin("client")
+            .unwrap()
+            .args(&["get", &transaction.id(), "-f", &account])
+            .assert()
+            .try_success()
+    });
+    assert!(result.is_ok());
 
     // execute the program, save txid
     let result = Command::cargo_bin("client")
@@ -63,7 +62,6 @@ fn basic_program() {
         let transition = execution.peek().unwrap();
         let output = transition.outputs();
 
-        // TODO when decrypt command is available we could use it to get a private output here
         if let Output::Public(_, Some(ref value)) = output[0] {
             assert_eq!("2u32", value.to_string());
         } else {
