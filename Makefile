@@ -2,7 +2,7 @@
 
 OS := $(shell uname | tr '[:upper:]' '[:lower:]')
 
-ifeq ($(shell uname| awk '{print $NF}'), arm64)
+ifeq ($(shell uname -p), arm)
 ARCH=arm64
 else
 ARCH=amd64
