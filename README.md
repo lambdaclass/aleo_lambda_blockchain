@@ -142,3 +142,33 @@ make reset
 ```
 
 to restore the initial state.
+
+## Running multiple nodes on docker compose
+
+Follow [Tendermint Core instructions](https://docs.tendermint.com/v0.34/networks/docker-compose.html) to build the tendermint binary and the tendermint/localnode image
+
+Copy the tendermint binary into a `build` directory in the root of this project.
+
+Then build the `snarkvm_abci` image:
+
+```
+make localnet-build-abci
+```
+
+And to start the test net run:
+
+```
+make localnet-start
+```
+
+Note that each node will require more than 2Gb to run so docker should be configured to use 10Gb or more in order to work with the default 4 nodes.
+
+To modify the configuartion you should edit `docker-compose.yml` file
+
+The configuration mounts some volumes in the `build/node{_}/` directories, and in case the tendermint nodes state needs to be reset, just run
+
+```
+make localnet-reset
+```
+
+or delete all the `node{_}` dirs to remove local `snarkvm_abci` data (it will require to download all the parameters on next run)

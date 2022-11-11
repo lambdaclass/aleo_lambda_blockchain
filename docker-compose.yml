@@ -1,0 +1,123 @@
+version: '3'
+
+services:
+  node0:
+    container_name: node0
+    image: "tendermint/localnode"
+    ports:
+      - "26656-26657:26656-26657"
+    environment:
+      - ID=0
+      - LOG=${LOG:-tendermint.log}
+    volumes:
+      - ./build:/tendermint:Z
+    depends_on: ["abci0"]
+    command: node --proxy_app=tcp://abci0:26658
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.2
+
+  node1:
+    container_name: node1
+    image: "tendermint/localnode"
+    ports:
+      - "26659-26660:26656-26657"
+    environment:
+      - ID=1
+      - LOG=${LOG:-tendermint.log}
+    volumes:
+      - ./build:/tendermint:Z
+    depends_on: ["abci1"]
+    command: node --proxy_app=tcp://abci1:26658
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.3
+
+  node2:
+    container_name: node2
+    image: "tendermint/localnode"
+    environment:
+      - ID=2
+      - LOG=${LOG:-tendermint.log}
+    ports:
+      - "26661-26662:26656-26657"
+    volumes:
+      - ./build:/tendermint:Z
+    depends_on: ["abci2"]
+    command: node --proxy_app=tcp://abci2:26658
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.4
+
+  node3:
+    container_name: node3
+    image: "tendermint/localnode"
+    environment:
+      - ID=3
+      - LOG=${LOG:-tendermint.log}
+    ports:
+      - "26663-26664:26656-26657"
+    volumes:
+      - ./build:/tendermint:Z
+    depends_on: ["abci3"]
+    command: node --proxy_app=tcp://abci3:26658
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.5
+
+  abci0:
+    container_name: abci0
+    image: "snarkvm_abci"
+    expose:
+      - "26658"
+    volumes:
+      - ./build/node0/root:/root:Z
+    command: "/target/release/snarkvm_abci --host 192.167.10.6"
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.6
+
+  abci1:
+    container_name: abci1
+    image: "snarkvm_abci"
+    expose:
+      - "26658"
+    volumes:
+      - ./build/node1/root:/root:Z
+    command: "/target/release/snarkvm_abci --host 192.167.10.7"
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.7
+
+  abci2:
+    container_name: abci2
+    image: "snarkvm_abci"
+    expose:
+      - "26658"
+    volumes:
+      - ./build/node2/root:/root:Z
+    command: "/target/release/snarkvm_abci --host 192.167.10.8"
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.8
+
+  abci3:
+    container_name: abci3
+    image: "snarkvm_abci"
+    expose:
+      - "26658"
+    volumes:
+      - ./build/node3/root:/root:Z
+    command: "/target/release/snarkvm_abci --host 192.167.10.9"
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.9
+
+networks:
+  localnet:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      -
+        subnet: 192.167.10.0/16

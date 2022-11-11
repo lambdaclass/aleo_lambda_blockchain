@@ -31,3 +31,24 @@ reset: bin/tendermint
 # run the snarkvm tendermint application
 abci:
 	cargo run --release --bin snarkvm_abci
+
+localnet-build-abci:
+	docker build -t snarkvm_abci .
+.PHONY: localnet-build-abci
+
+# Run a 4-node testnet locally
+localnet-start: localnet-stop
+	@if ! [ -f build/node0/config/genesis.json ]; then docker run --rm -v $(CURDIR)/build:/tendermint:Z tendermint/localnode testnet --config /etc/tendermint/config-template.toml --o . --starting-ip-address 192.167.10.2; fi
+	docker-compose up
+.PHONY: localnet-start
+
+# Stop testnet
+localnet-stop:
+	docker-compose down
+.PHONY: localnet-stop
+
+# Reset the testnet data
+localnet-reset:
+	rm -Rf build/node?/config
+	rm -Rf build/node?/data
+.PHONY: localnet-reset
