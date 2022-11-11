@@ -57,6 +57,10 @@ pub struct Get {
     /// Transaction ID from which to retrieve information
     #[clap(value_parser)]
     pub transaction_id: String,
+
+    /// Whether to decrypt the incoming transaction private records
+    #[clap(short, long, default_value_t = false)]
+    pub decrypt: bool,
 }
 
 #[derive(Debug, Parser)]

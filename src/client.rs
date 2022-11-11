@@ -1,9 +1,10 @@
 use anyhow::{anyhow, bail, ensure, Result};
 use clap::Parser;
 use commands::{Account, Command, Get, Program};
-use lib::Transaction;
+use lib::{Transaction, account};
 use log::debug;
-use snarkvm::prelude::Process;
+use serde::{Deserialize, Serialize};
+use snarkvm::prelude::{Output, Plaintext, Process, Record};
 use snarkvm::{
     circuit::AleoV0,
     prelude::Value,
@@ -16,7 +17,6 @@ use std::str::FromStr;
 use tendermint_rpc::query::Query;
 use tendermint_rpc::{Client, HttpClient, Order};
 
-mod account;
 mod commands;
 
 const BLOCKCHAIN_URL: &str = "http://127.0.0.1:26657";
@@ -55,6 +55,12 @@ async fn main() {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct GetDecryptionResponse {
+    execution: Transaction,
+    decrypted_records: Vec<Record<Testnet3, Plaintext<Testnet3>>>,
+}
+
 // TODO move to command module
 async fn run(command: Command, account_file: Option<PathBuf>) -> Result<String> {
     let output = match command {
@@ -80,14 +86,29 @@ async fn run(command: Command, account_file: Option<PathBuf>) -> Result<String> 
             broadcast_to_blockchain(&transaction).await?;
             transaction.json()
         }
-        Command::Get(Get { transaction_id }) => {
+        Command::Get(Get {
+            transaction_id,
+            decrypt,
+        }) => {
             let transaction = get_transaction(&transaction_id).await?;
-            transaction.json()
+
+            if !decrypt {
+                transaction.json()
+            } else {
+                let credentials = account::Credentials::load(account_file)?;
+                let records = transaction.clone().decrypt_records(&credentials)?;
+
+                serde_json::to_string_pretty(&GetDecryptionResponse {
+                    execution: transaction,
+                    decrypted_records: records,
+                })?
+            }
         }
         _ => todo!("Command has not been implemented yet"),
     };
     Ok(output)
 }
+
 
 async fn get_transaction(tx_id: &str) -> Result<Transaction> {
     let client = HttpClient::new(BLOCKCHAIN_URL)?;

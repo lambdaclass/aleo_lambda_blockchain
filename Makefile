@@ -32,6 +32,10 @@ reset: bin/tendermint
 abci:
 	cargo run --release --bin snarkvm_abci
 
+# run tests on release mode to ensure there is no extra printing to stdout
+test:
+	cargo test --release -- --nocapture
+  
 localnet-build-abci:
 	docker build -t snarkvm_abci .
 .PHONY: localnet-build-abci
