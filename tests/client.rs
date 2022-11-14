@@ -3,12 +3,11 @@ use assert_cmd::{
     Command,
 };
 use assert_fs::NamedTempFile;
-use lib::{Transaction, account};
+use lib::{account, Transaction};
 use retry::{delay::Fixed, Error};
 use serde::de::DeserializeOwned;
-use snarkvm::{prelude::Output};
+use snarkvm::prelude::Output;
 use std::fs;
-
 
 #[test]
 fn basic_program() {
@@ -18,25 +17,25 @@ fn basic_program() {
     let (_program_file, program_path) = load_program("hello");
     let result = Command::cargo_bin("client")
         .unwrap()
-        .args(&["program", "deploy", &program_path, "-f", &account])
+        .args(["program", "deploy", &program_path, "-f", &account])
         .assert()
         .success();
     let transaction: Transaction = parse_output(result);
 
     // get deployment tx, need to retry until it gets committed
-    let result = retry::retry(Fixed::from_millis(1000).take(5), || {
+    retry::retry(Fixed::from_millis(1000).take(5), || {
         Command::cargo_bin("client")
             .unwrap()
-            .args(&["get", &transaction.id(), "-f", &account])
+            .args(["get", transaction.id(), "-f", &account])
             .assert()
             .try_success()
-    });
-    assert!(result.is_ok());
+    })
+    .unwrap();
 
     // execute the program, save txid
     let result = Command::cargo_bin("client")
         .unwrap()
-        .args(&[
+        .args([
             "program",
             "execute",
             &program_path,
@@ -69,6 +68,74 @@ fn basic_program() {
     }
 }
 
+#[test]
+fn program_validations() {
+    let (_tempfile, account) = new_account();
+    let (_program_file, program_path) = load_program("hello");
+
+    // fail on execute non deployed command
+    Command::cargo_bin("client")
+        .unwrap()
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "hello",
+            "1u32",
+            "1u32",
+            "-f",
+            &account,
+        ])
+        .assert()
+        .failure();
+
+    Command::cargo_bin("client")
+        .unwrap()
+        .args(["program", "deploy", &program_path, "-f", &account])
+        .assert()
+        .success();
+
+    // fail on already deployed
+    Command::cargo_bin("client")
+        .unwrap()
+        .args(["program", "deploy", &program_path, "-f", &account])
+        .assert()
+        .failure();
+
+    // fail on unknown function
+    Command::cargo_bin("client")
+        .unwrap()
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "goodbye",
+            "1u32",
+            "1u32",
+            "-f",
+            &account,
+        ])
+        .assert()
+        .failure();
+
+    // fail on missing parameter
+    Command::cargo_bin("client")
+        .unwrap()
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "hello",
+            "1u32",
+            "-f",
+            &account,
+        ])
+        .assert()
+        .failure();
+}
+
+// HELPERS
+
 /// Retries iteratively to get a transaction until something returns
 /// If `decrypt_cred_file` is Some(val), it uses the val as the credentials file in order to get the required credentials to attempt decryption
 fn eventually_get_tx(
@@ -91,74 +158,6 @@ fn eventually_get_tx(
     })
 }
 
-#[test]
-fn program_validations() {
-    let (_tempfile, account) = new_account();
-    let (_program_file, program_path) = load_program("hello");
-
-    // fail on execute non deployed command
-    Command::cargo_bin("client")
-        .unwrap()
-        .args(&[
-            "program",
-            "execute",
-            &program_path,
-            "hello",
-            "1u32",
-            "1u32",
-            "-f",
-            &account,
-        ])
-        .assert()
-        .failure();
-
-    Command::cargo_bin("client")
-        .unwrap()
-        .args(&["program", "deploy", &program_path, "-f", &account])
-        .assert()
-        .success();
-
-    // fail on already deployed
-    Command::cargo_bin("client")
-        .unwrap()
-        .args(&["program", "deploy", &program_path, "-f", &account])
-        .assert()
-        .failure();
-
-    // fail on unknown function
-    Command::cargo_bin("client")
-        .unwrap()
-        .args(&[
-            "program",
-            "execute",
-            &program_path,
-            "goodbye",
-            "1u32",
-            "1u32",
-            "-f",
-            &account,
-        ])
-        .assert()
-        .failure();
-
-    // fail on missing parameter
-    Command::cargo_bin("client")
-        .unwrap()
-        .args(&[
-            "program",
-            "execute",
-            &program_path,
-            "hello",
-            "1u32",
-            "-f",
-            &account,
-        ])
-        .assert()
-        .failure();
-}
-
-// HELPERS
-
 /// Generate a tempfile with account credentials and return it along with its path.
 /// The file will be removed when it goes out of scope.
 fn new_account() -> (NamedTempFile, String) {
@@ -167,7 +166,7 @@ fn new_account() -> (NamedTempFile, String) {
 
     Command::cargo_bin("client")
         .unwrap()
-        .args(&["account", "new", "-f", &path])
+        .args(["account", "new", "-f", &path])
         .assert()
         .success();
 
@@ -181,7 +180,7 @@ fn decrypt_records() {
 
     let _ = Command::cargo_bin("client")
         .unwrap()
-        .args(&["program", "deploy", &program_path, "-f", &account])
+        .args(["program", "deploy", &program_path, "-f", &account])
         .assert()
         .success();
 
@@ -190,7 +189,7 @@ fn decrypt_records() {
 
     let result = Command::cargo_bin("client")
         .unwrap()
-        .args(&[
+        .args([
             "program",
             "execute",
             &program_path,
@@ -214,15 +213,14 @@ fn decrypt_records() {
     let (_program_file, _) = load_program("token");
 
     // should fail to decrypt records (different credentials)
-    let result = eventually_get_tx(transaction.id(), Some(&account));
-    assert!(result.is_err());
+    eventually_get_tx(transaction.id(), Some(&account)).unwrap_err();
 }
 
 /// Load the source code from the given example file, and return a tempfile along with its path,
 /// with the same source code but a randomized name.
 /// The file will be removed when it goes out of scope.
 fn load_program(program_name: &str) -> (NamedTempFile, String) {
-    let program_file = NamedTempFile::new(&program_name).unwrap();
+    let program_file = NamedTempFile::new(program_name).unwrap();
     let path = program_file.path().to_string_lossy().to_string();
     // FIXME hardcoded path
     let source = fs::read_to_string(format!("aleo/{}.aleo", program_name)).unwrap();
@@ -238,7 +236,7 @@ fn load_program(program_name: &str) -> (NamedTempFile, String) {
 fn unique_id() -> String {
     uuid::Uuid::new_v4()
         .to_string()
-        .split("-")
+        .split('-')
         .last()
         .unwrap()
         .to_string()

@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, ensure, Result};
 use clap::Parser;
 use commands::{Account, Command, Get, Program};
-use lib::{Transaction, account};
+use lib::{account, Transaction};
 use log::debug;
 use serde::{Deserialize, Serialize};
-use snarkvm::prelude::{Output, Plaintext, Process, Record};
+use snarkvm::prelude::{Plaintext, Process, Record};
 use snarkvm::{
     circuit::AleoV0,
     prelude::Value,
@@ -109,7 +109,6 @@ async fn run(command: Command, account_file: Option<PathBuf>) -> Result<String> 
     Ok(output)
 }
 
-
 async fn get_transaction(tx_id: &str) -> Result<Transaction> {
     let client = HttpClient::new(BLOCKCHAIN_URL)?;
     // todo: this index key might have to be a part of the shared lib so that both the CLI and the ABCI can be in sync
@@ -150,7 +149,10 @@ fn generate_deployment(path: &Path) -> Result<Transaction> {
     // using a uuid for txid, just to skip having to use an additional fee record which now is necessary to run
     // Transaction::from_deployment
     let id = uuid::Uuid::new_v4().to_string();
-    Ok(Transaction::Deployment { id, deployment })
+    Ok(Transaction::Deployment {
+        id,
+        deployment: Box::new(deployment),
+    })
 }
 
 // TODO move the low level SnarkVM stuff to a helper vm module

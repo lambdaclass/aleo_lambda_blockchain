@@ -1,6 +1,6 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use snarkvm::prelude::{Deployment, Execution, Testnet3, Record, Plaintext, Output};
+use snarkvm::prelude::{Deployment, Execution, Output, Plaintext, Record, Testnet3};
 
 pub mod account;
 
@@ -8,7 +8,7 @@ pub mod account;
 pub enum Transaction {
     Deployment {
         id: String,
-        deployment: Deployment<Testnet3>,
+        deployment: Box<Deployment<Testnet3>>,
     },
     Execution {
         id: String,

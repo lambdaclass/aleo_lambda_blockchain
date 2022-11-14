@@ -1,0 +1,41 @@
+name: mOStropy build checks
+on: push
+jobs:
+  integration-tests:
+    runs-on: [self-hosted, nomad]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+            profile: minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '1.16.1'
+      - run: cargo build --release
+      - run: make reset
+      - run: |
+          make node > /dev/null &
+          make abci > /dev/null &
+          cargo test --release
+  clippy:
+    runs-on: [self-hosted, nomad]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+            components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: apt install -y clang libclang1
+      - run: cargo +nightly clippy --all-targets --all-features -- -D warnings
+  format:
+    runs-on: [self-hosted, nomad]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+            components: rustfmt
+      - run: cargo fmt -- --check
