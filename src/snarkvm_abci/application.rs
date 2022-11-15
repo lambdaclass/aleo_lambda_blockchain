@@ -161,7 +161,7 @@ impl Application for SnarkVMApp {
         info!("Committed height {}", height);
         ResponseCommit {
             data: app_hash,
-            retain_height: height - 1,
+            retain_height: 0,
         }
     }
 }
