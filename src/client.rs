@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tendermint_rpc::query::Query;
 use tendermint_rpc::{Client, HttpClient, Order};
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
 mod commands;
 
@@ -31,16 +33,25 @@ pub struct Cli {
     /// The account credentials file.
     #[clap(short, long, global = true)]
     file: Option<PathBuf>,
+
+    /// Output log lines to stdout based on the desired log level (RUST_LOG env var).
+    #[clap(short, long, global = false)]
+    verbose: bool,
 }
 
 #[tokio::main()]
 async fn main() {
-    simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Info)
-        .env()
-        .init()
-        .unwrap();
     let cli = Cli::parse();
+
+    if cli.verbose {
+        tracing_subscriber::fmt()
+            // Use a more compact, abbreviated log format
+            .compact()
+            .with_env_filter(EnvFilter::from_default_env())
+            // Build and init the subscriber
+            .finish()
+            .init();
+    }
 
     match run(cli.command, cli.file).await {
         Err(err) => {
