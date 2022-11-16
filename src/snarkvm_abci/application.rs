@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use bytes::BytesMut;
 use lib::Transaction;
 use snarkvm::{
     circuit::AleoV0,
-    prelude::{Process, ProgramMemory, ProgramStore, Testnet3},
+    prelude::{Itertools, Process, ProgramMemory, ProgramStore, Testnet3},
 };
 use std::{
     convert::Into,
@@ -15,6 +15,8 @@ use tendermint_proto::abci::{
     ResponseCheckTx, ResponseCommit, ResponseDeliverTx, ResponseInfo, ResponseQuery,
 };
 use tracing::{debug, error, info};
+
+use crate::record_store::RecordStore;
 
 // NOTE: in the sample app, the following const was defined on one of the internal libraries, but was not `pub`
 // so we had to extract it here
@@ -29,7 +31,9 @@ pub const MAX_VARINT_LENGTH: usize = 16;
 /// For reference see https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview
 #[derive(Debug, Clone)]
 pub struct SnarkVMApp {
+    // FIXME this should be removed once we introduce a program store instead of using the snarkvm process through the driver
     cmd_tx: Sender<Command>,
+    records: RecordStore,
 }
 
 impl Application for SnarkVMApp {
@@ -80,28 +84,24 @@ impl Application for SnarkVMApp {
         info!("Check Tx");
 
         let tx = bincode::deserialize(&request.tx).unwrap();
-        if let Err(err) = self.send_verify_transaction(tx) {
+
+        // TODO do we need to explicitly check the record serial number to guarantee it's being spent
+        // by its owner? or is that already included in the execution verification?
+
+        let result = self
+            .check_no_duplicate_records(&tx)
+            .and_then(|_| self.check_inputs_are_unspent(&tx))
+            .and_then(|_| self.send_verify_transaction(tx.clone()));
+
+        if let Err(err) = result {
             ResponseCheckTx {
                 code: 1,
-                data: Vec::default(),
                 log: format!("Could not verify transaction: {}", err),
                 info: format!("Could not verify transaction: {}", err),
-                gas_wanted: 0,
-                gas_used: 0,
-                events: vec![],
-                codespace: "".to_string(),
                 ..Default::default()
             }
         } else {
             ResponseCheckTx {
-                code: 0,
-                data: Vec::default(),
-                log: "".to_string(),
-                info: "".to_string(),
-                gas_wanted: 0,
-                gas_used: 0,
-                events: vec![],
-                codespace: "".to_string(),
                 ..Default::default()
             }
         }
@@ -114,47 +114,62 @@ impl Application for SnarkVMApp {
         info!("Deliver Tx");
 
         let tx: Transaction = bincode::deserialize(&request.tx).unwrap();
+
+        // we need to repeat the same validations as deliver_tx and only, because the protocol can't
+        // guarantee that a bynzantine validator won't propose a block with invalid transactions.
+        // if validation they pass  apply (but not commit) the application state changes.
+        // Note that we check for duplicate records within the transaction before attempting to spend them
+        // so we don't end up with a half-applied transaction in the record store.
         let result = self
-            .send_verify_transaction(tx.clone())
+            .check_no_duplicate_records(&tx)
+            .and_then(|_| self.check_inputs_are_unspent(&tx))
+            .and_then(|_| self.send_verify_transaction(tx.clone()))
+            .and_then(|_| self.spend_input_records(&tx))
+            .and_then(|_| self.add_output_records(&tx))
+            // FIXME we currently apply tx changes --program deploys-- right away
+            // but this should be done in the commit phase.
             .and_then(|_| self.send_finalize_transaction(tx.clone()));
 
-        // prepare this transaction to be queried by app.tx_id
-        let index_event = Event {
-            r#type: "app".to_string(),
-            attributes: vec![EventAttribute {
-                key: "tx_id".to_string().into_bytes(),
-                value: tx.id().to_string().into_bytes(),
-                index: true,
-            }],
-        };
-
         match result {
-            Ok(_) => ResponseDeliverTx {
-                code: 0,
-                data: Vec::default(),
-                log: "".to_string(),
-                info: "".to_string(),
-                gas_wanted: 0,
-                gas_used: 0,
-                events: vec![index_event],
-                codespace: "".to_string(),
-            },
+            Ok(_) => {
+                // prepare this transaction to be queried by app.tx_id
+                let index_event = Event {
+                    r#type: "app".to_string(),
+                    attributes: vec![EventAttribute {
+                        key: "tx_id".to_string().into_bytes(),
+                        value: tx.id().to_string().into_bytes(),
+                        index: true,
+                    }],
+                };
+
+                ResponseDeliverTx {
+                    events: vec![index_event],
+                    ..Default::default()
+                }
+            }
             Err(e) => ResponseDeliverTx {
                 code: 1,
-                data: Vec::default(),
-                log: format!("Could not verify transaction: {}", e),
-                info: format!("Could not verify transaction: {}", e),
-                gas_wanted: 0,
-                gas_used: 0,
-                events: vec![],
-                codespace: "".to_string(),
+                log: format!("Error delivering transaction: {}", e),
+                info: format!("Error delivering transaction: {}", e),
+                ..Default::default()
             },
         }
     }
 
-    /// This hook is used to compute a cryptographic commitment to the current application state,
-    /// to be stored in the header of the next Block.
+    /// This hook commits is called when the block is comitted (after deliver_tx has been called for each transaction).
+    /// Changes to application should take effect here. Tendermint guarantees that no transaction is processed while this
+    /// hook is running.
+    /// The result includes a hash of the application state which will be included in the block header.
+    /// This hash should be deterministic, different app state hashes will produce blockchain forks.
     fn commit(&self) -> ResponseCommit {
+        // TODO the app hash should either consider the record and program state
+        // or maybe calculate some digest of each committed transaction
+
+        // apply pending changes in the record store: mark used records as spent, add inputs as unspent
+        if let Err(err) = self.records.commit() {
+            error!("Failure while committing the record store {}", err);
+        }
+
         let (result_tx, result_rx) = channel();
         channel_send(&self.cmd_tx, Command::Commit { result_tx }).unwrap();
         let (height, app_hash) = channel_recv(&result_rx).unwrap();
@@ -170,9 +185,70 @@ impl SnarkVMApp {
     /// Constructor.
     pub fn new() -> (Self, SnarkVMDriver) {
         let (cmd_tx, cmd_rx) = channel();
-        (Self { cmd_tx }, SnarkVMDriver::new(cmd_rx))
+        (
+            Self {
+                cmd_tx,
+
+                // we rather crash than start with a badly initialized store
+                records: RecordStore::new("records").expect("cannot create a record store"),
+            },
+            SnarkVMDriver::new(cmd_rx),
+        )
     }
 
+    /// Fail if the same record appears more than once as a function input in the transaction.
+    fn check_no_duplicate_records(&self, transaction: &Transaction) -> Result<()> {
+        let commitments = transaction.origin_commitments();
+        if let Some(commitment) = commitments.iter().duplicates().next() {
+            bail!(
+                "Input record commitment {} in transaction {} is duplicate",
+                commitment,
+                transaction.id()
+            );
+        }
+        Ok(())
+    }
+
+    /// the transaction should be rejected if it's input records don't exist
+    /// or they aren't known to be unspent either in the ledger or in an unconfirmed transaction output
+    fn check_inputs_are_unspent(&self, transaction: &Transaction) -> Result<()> {
+        let commitments = transaction.origin_commitments();
+        let already_spent = commitments
+            .iter()
+            .find(|commitment| !self.records.is_unspent(commitment).unwrap_or(true));
+        if let Some(commitment) = already_spent {
+            bail!("input record {} is not unspent", commitment)
+        }
+        Ok(())
+    }
+
+    /// Mark all input records as spent in the record store. This operation could fail if the records are unknown or already spent,
+    /// but it's assumed the that was validated before as to prevent half-applied transactions in the block.
+    fn spend_input_records(&self, transaction: &Transaction) -> Result<()> {
+        let commitments = transaction.origin_commitments();
+        commitments
+            .iter()
+            .map(|commitment| self.records.spend(commitment))
+            .find(|result| result.is_err())
+            .unwrap_or(Ok(()))
+    }
+
+    /// Add the tranasction output records as unspent in the record store.
+    fn add_output_records(&self, transaction: &Transaction) -> Result<()> {
+        if let Transaction::Execution { ref execution, .. } = transaction {
+            execution
+                .iter()
+                .flat_map(|transition| transition.output_records())
+                .map(|(commitment, record)| self.records.add(*commitment, record.clone()))
+                .find(|result| result.is_err())
+                .unwrap_or(Ok(()))
+        } else {
+            Ok(())
+        }
+    }
+
+    // FIXME this is the part of the transaction validation that relies on snarkvm's Process struct
+    // once the state is managed out of snarkvm, we can remove this channel and handle the validation here
     fn send_verify_transaction(&self, transaction: Transaction) -> Result<()> {
         info!("checking transaction: {}", transaction);
         let (result_tx, result_rx) = channel();
@@ -186,6 +262,8 @@ impl SnarkVMApp {
         channel_recv(&result_rx)?
     }
 
+    // FIXME this is the part of the transaction state changes that rely on snarkvm's Process struct
+    // once the state is managed out of snarkvm, we can remove this channel and handle the validation here
     fn send_finalize_transaction(&self, transaction: Transaction) -> Result<()> {
         info!("finalizing transaction: {} ", transaction);
         let (result_tx, result_rx) = channel();
@@ -200,11 +278,9 @@ impl SnarkVMApp {
     }
 }
 
+// FIXME this should be removed once we introduce a program store instead of using the snarkvm process through the driver
 /// Driver that manages snarkvm-specific application state, for example the known deployed programs.
 /// The driver listens for commands that need to interact with the state.
-// NOTE: this driver shouldn't necessarily need to know about transactions, but rather about programs:
-// how to validate new programs and execution proofs. To arrange the code like that we likely need to
-// replace the SnarkVM process that we currently use to track the program data.
 pub struct SnarkVMDriver {
     /// The SnarkVM Process keeps track of in-memory application state such as the verifying keys of deployed program's functions.
     process: Process<Testnet3>,
@@ -213,6 +289,7 @@ pub struct SnarkVMDriver {
     /// not actually relied-upon for storage and will eventually be removed.
     store: ProgramStore<Testnet3, ProgramMemory<Testnet3>>,
 
+    // TODO consider an atomic type for this
     /// The last known height of the blockchain. Required by Tendermint to track potential drift between the ABCI and the blockchain.
     height: i64,
     /// A hash of the current application state. Required by Tendermint to track inconsistencies between the blockchain and the app
@@ -329,4 +406,29 @@ fn channel_send<T>(tx: &Sender<T>, value: T) -> Result<()> {
 
 fn channel_recv<T>(rx: &Receiver<T>) -> Result<T> {
     rx.recv().map_err(Into::into)
+}
+
+// just covering a few special cases here. lower level test are done in record store, higher level in integration tests.
+#[cfg(test)]
+mod tests {
+    // use super::*;
+
+    #[test]
+    fn test_check_tx() {
+        // TODO
+        // fail if duplicate (non spent) inputs
+        // fail if already spent inputs
+        // succeed otherwise
+    }
+
+    #[test]
+    fn test_deliver_tx() {
+        // fail if duplicate (non spent) inputs
+        // check that they remain unspent
+
+        // fail if already spent inputs
+
+        // check that inputs are not unspent anymore
+        // check that outputs are now unspent
+    }
 }

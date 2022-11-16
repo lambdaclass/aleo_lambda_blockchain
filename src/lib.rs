@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use snarkvm::prelude::{Deployment, Execution, Output, Plaintext, Record, Testnet3};
+use snarkvm::prelude::{Deployment, Execution, Field, Origin, Output, Plaintext, Record, Testnet3};
 
 pub mod account;
 
@@ -53,6 +53,26 @@ impl Transaction {
     pub fn json(&self) -> String {
         // consider https://crates.io/crates/attrsets
         serde_json::to_string_pretty(self).unwrap()
+    }
+
+    /// If the transaction is an execution, return the list of input record origins
+    /// (in case they are record commitments).
+    pub fn origin_commitments(&self) -> Vec<&Field<Testnet3>> {
+        if let Transaction::Execution { ref execution, .. } = self {
+            execution
+                .iter()
+                .flat_map(|transition| transition.origins())
+                .filter_map(|origin| {
+                    if let Origin::Commitment(commitment) = origin {
+                        Some(commitment)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 }
 

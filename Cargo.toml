@@ -44,6 +44,7 @@ tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["env-filter", "fmt", "std"]}
 uuid = { version = "1.2.1", features = ["v4"] }
 dirs = "4.0.0"
+rocksdb = "0.19.0"
 
 [dependencies.snarkvm]
 git = "https://github.com/Entropy1729/snarkVM.git"
@@ -54,3 +55,4 @@ features = ["circuit", "console", "parallel"]
 assert_fs = "1.0.9"
 assert_cmd = "2.0.6"
 retry = "2.0.0"
+ctor = "0.1.23"

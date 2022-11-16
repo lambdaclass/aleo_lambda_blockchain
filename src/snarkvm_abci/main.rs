@@ -6,6 +6,7 @@ use tendermint_abci::ServerBuilder;
 use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt};
 
 mod application;
+mod record_store;
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about)]

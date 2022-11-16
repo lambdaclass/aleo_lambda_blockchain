@@ -11,3 +11,5 @@ Cargo.lock
 **/*.rs.bk
 hello/build
 bin/
+.db_test
+*.db
