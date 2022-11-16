@@ -21,7 +21,8 @@ use tracing_subscriber::EnvFilter;
 
 mod commands;
 
-const BLOCKCHAIN_URL: &str = "http://127.0.0.1:26657";
+/// Default tendermint url
+const LOCAL_BLOCKCHAIN_URL: &str = "http://127.0.0.1:26657";
 
 #[derive(Debug, Parser)]
 #[clap()]
@@ -37,6 +38,10 @@ pub struct Cli {
     /// Output log lines to stdout based on the desired log level (RUST_LOG env var).
     #[clap(short, long, global = false)]
     verbose: bool,
+
+    /// tendermint node url
+    #[clap(short, long, env = "BLOCKCHAIN_URL", default_value = LOCAL_BLOCKCHAIN_URL)]
+    url: String,
 }
 
 #[tokio::main()]
@@ -53,7 +58,7 @@ async fn main() {
             .init();
     }
 
-    match run(cli.command, cli.file).await {
+    match run(cli.command, cli.file, cli.url).await {
         Err(err) => {
             let mut output = HashMap::new();
             output.insert("error", err.to_string());
@@ -73,7 +78,7 @@ pub struct GetDecryptionResponse {
 }
 
 // TODO move to command module
-async fn run(command: Command, account_file: Option<PathBuf>) -> Result<String> {
+async fn run(command: Command, account_file: Option<PathBuf>, url: String) -> Result<String> {
     let output = match command {
         Command::Account(Account::New) => {
             let account = account::Credentials::new()?;
@@ -82,7 +87,7 @@ async fn run(command: Command, account_file: Option<PathBuf>) -> Result<String> 
         }
         Command::Program(Program::Deploy { path }) => {
             let transaction = generate_deployment(&path)?;
-            broadcast_to_blockchain(&transaction).await?;
+            broadcast_to_blockchain(&transaction, &url).await?;
             transaction.json()
         }
         Command::Program(Program::Execute {
@@ -94,14 +99,14 @@ async fn run(command: Command, account_file: Option<PathBuf>) -> Result<String> 
                 .map_err(|_| anyhow!("credentials not found"))?;
 
             let transaction = generate_execution(&path, function, &inputs, &credentials)?;
-            broadcast_to_blockchain(&transaction).await?;
+            broadcast_to_blockchain(&transaction, &url).await?;
             transaction.json()
         }
         Command::Get(Get {
             transaction_id,
             decrypt,
         }) => {
-            let transaction = get_transaction(&transaction_id).await?;
+            let transaction = get_transaction(&transaction_id, &url).await?;
 
             if !decrypt {
                 transaction.json()
@@ -120,8 +125,8 @@ async fn run(command: Command, account_file: Option<PathBuf>) -> Result<String> 
     Ok(output)
 }
 
-async fn get_transaction(tx_id: &str) -> Result<Transaction> {
-    let client = HttpClient::new(BLOCKCHAIN_URL)?;
+async fn get_transaction(tx_id: &str, url: &str) -> Result<Transaction> {
+    let client = HttpClient::new(url)?;
     // todo: this index key might have to be a part of the shared lib so that both the CLI and the ABCI can be in sync
     let query = Query::contains("app.tx_id", tx_id);
 
@@ -214,10 +219,10 @@ fn generate_execution(
     Ok(Transaction::Execution { id, execution })
 }
 
-async fn broadcast_to_blockchain(transaction: &Transaction) -> Result<()> {
+async fn broadcast_to_blockchain(transaction: &Transaction, url: &str) -> Result<()> {
     let transaction_serialized = bincode::serialize(&transaction).unwrap();
 
-    let client = HttpClient::new(BLOCKCHAIN_URL).unwrap();
+    let client = HttpClient::new(url).unwrap();
 
     let response = client
         .broadcast_tx_sync(transaction_serialized.into())
