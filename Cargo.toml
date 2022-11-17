@@ -10,7 +10,7 @@ opt-level = 3
 debug-assertions = true
 
 [lib]
-path = "src/lib.rs"
+path = "src/lib/mod.rs"
 doctest = false
 name = "lib"
 

@@ -1,5 +1,5 @@
 use clap::Parser;
-use snarkvm::prelude::{Address, Identifier, Testnet3, Value};
+use lib::vm::{Address, Identifier, Value};
 use std::path::PathBuf;
 
 /// Commands to manage accounts.
@@ -15,7 +15,7 @@ pub enum Account {
     Transfer {
         /// Account to which the credits will be transferred.
         #[clap(short, long)]
-        recipient_public_key: Address<Testnet3>,
+        recipient_public_key: Address,
         /// Amount of credits to transfer
         #[clap(value_parser, short, long)]
         credits: u64,
@@ -43,10 +43,10 @@ pub enum Program {
         path: PathBuf,
         /// The function name.
         #[clap(value_parser)]
-        function: Identifier<Testnet3>,
+        function: Identifier,
         /// The function inputs.
         #[clap(value_parser)]
-        inputs: Vec<Value<Testnet3>>,
+        inputs: Vec<Value>,
     },
 }
 

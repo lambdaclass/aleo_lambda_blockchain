@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Result};
 use bytes::BytesMut;
-use lib::Transaction;
-use snarkvm::{
-    circuit::AleoV0,
-    prelude::{Itertools, Process, ProgramMemory, ProgramStore, Testnet3},
+use lib::{
+    vm::{self, Process},
+    Transaction,
 };
+use snarkvm::prelude::Itertools;
 use std::{
     convert::Into,
     sync::mpsc::{channel, Receiver, Sender},
@@ -283,15 +283,12 @@ impl SnarkVMApp {
 /// The driver listens for commands that need to interact with the state.
 pub struct SnarkVMDriver {
     /// The SnarkVM Process keeps track of in-memory application state such as the verifying keys of deployed program's functions.
-    process: Process<Testnet3>,
-
-    /// A SnarkVM program store. this is only used to comply with the current SnarkVM Process API, but it's
-    /// not actually relied-upon for storage and will eventually be removed.
-    store: ProgramStore<Testnet3, ProgramMemory<Testnet3>>,
+    process: Process,
 
     // TODO consider an atomic type for this
     /// The last known height of the blockchain. Required by Tendermint to track potential drift between the ABCI and the blockchain.
     height: i64,
+
     /// A hash of the current application state. Required by Tendermint to track inconsistencies between the blockchain and the app
     /// (inconsistencies will be treated as blockchain forks by Tendermint.)
     app_hash: Vec<u8>,
@@ -303,7 +300,6 @@ pub struct SnarkVMDriver {
 impl SnarkVMDriver {
     fn new(cmd_rx: Receiver<Command>) -> Self {
         Self {
-            store: ProgramStore::<_, ProgramMemory<_>>::open(None).unwrap(),
             process: Process::load().unwrap(),
             height: 0,
             app_hash: vec![0_u8; MAX_VARINT_LENGTH],
@@ -336,29 +332,11 @@ impl SnarkVMDriver {
         }
     }
 
-    fn verify(&mut self, transaction: Transaction) -> Result<()> {
-        let rng = &mut rand::thread_rng();
-        let result = match transaction {
-            Transaction::Deployment { ref deployment, .. } => {
-                self.process.verify_deployment::<AleoV0, _>(deployment, rng)
-            }
-            Transaction::Execution { ref execution, .. } => {
-                self.process.verify_execution(execution)
-            }
-        };
-
-        match result {
-            Err(ref e) => error!("Transaction {} verification failed: {}", transaction, e),
-            _ => info!("Transaction {} verification successful", transaction),
-        };
-        result
-    }
-
     fn finalize(&mut self, transaction: Transaction) -> Result<()> {
         match transaction {
             Transaction::Deployment { deployment, .. } => {
                 // there is a finalize execution but it's not clear that we actually need it
-                self.process.finalize_deployment(&self.store, &deployment)
+                vm::finalize_deployment(&deployment, &mut self.process)
             }
             Transaction::Execution { .. } => {
                 // we run finalize to save the program in the process for later execute verification
@@ -367,6 +345,24 @@ impl SnarkVMDriver {
                 Ok(())
             }
         }
+    }
+
+    fn verify(&mut self, transaction: Transaction) -> Result<()> {
+        let rng = &mut rand::thread_rng();
+        let result = match transaction {
+            Transaction::Deployment { ref deployment, .. } => {
+                vm::verify_deployment(deployment, &self.process, rng)
+            }
+            Transaction::Execution { ref execution, .. } => {
+                vm::verify_execution(execution, &self.process)
+            }
+        };
+
+        match result {
+            Err(ref e) => error!("Transaction {} verification failed: {}", transaction, e),
+            _ => info!("Transaction {} verification successful", transaction),
+        };
+        result
     }
 
     fn commit(&mut self, result_tx: &Sender<(i64, Vec<u8>)>) -> Result<()> {

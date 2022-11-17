@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use snarkvm::prelude::{Deployment, Execution, Field, Origin, Output, Plaintext, Record, Testnet3};
 
 pub mod account;
+pub mod vm;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Transaction {

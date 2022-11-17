@@ -23,14 +23,7 @@ fn basic_program() {
     let transaction: Transaction = parse_output(result);
 
     // get deployment tx, need to retry until it gets committed
-    retry::retry(Fixed::from_millis(1000).take(5), || {
-        Command::cargo_bin("client")
-            .unwrap()
-            .args(["get", transaction.id(), "-f", &account])
-            .assert()
-            .try_success()
-    })
-    .unwrap();
+    assert!(eventually_get_tx(transaction.id(), None).is_ok());
 
     // execute the program, save txid
     let result = Command::cargo_bin("client")

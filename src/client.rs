@@ -1,19 +1,14 @@
 use anyhow::{anyhow, bail, ensure, Result};
 use clap::Parser;
 use commands::{Account, Command, Get, Program};
-use lib::{account, Transaction};
+use lib::vm::Record;
+use lib::{account, vm, Transaction};
 use log::debug;
+use rand::thread_rng;
 use serde::{Deserialize, Serialize};
-use snarkvm::prelude::{Plaintext, Process, Record};
-use snarkvm::{
-    circuit::AleoV0,
-    prelude::Value,
-    prelude::{Identifier, Testnet3},
-};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use tendermint_rpc::query::Query;
 use tendermint_rpc::{Client, HttpClient, Order};
 use tracing_subscriber::util::SubscriberInitExt;
@@ -74,7 +69,7 @@ async fn main() {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct GetDecryptionResponse {
     execution: Transaction,
-    decrypted_records: Vec<Record<Testnet3, Plaintext<Testnet3>>>,
+    decrypted_records: Vec<Record>,
 }
 
 // TODO move to command module
@@ -149,18 +144,11 @@ async fn get_transaction(tx_id: &str, url: &str) -> Result<Transaction> {
 
 fn generate_deployment(path: &Path) -> Result<Transaction> {
     let program_string = fs::read_to_string(path).unwrap();
-    let program = snarkvm::prelude::Program::from_str(&program_string).unwrap();
+    debug!("Deploying program {}", program_string);
 
-    let rng = &mut rand::thread_rng();
+    let mut rng = thread_rng();
 
-    debug!("Deploying program {}", program);
-
-    // NOTE: we're skipping the part of imported programs
-    // https://github.com/Entropy1729/snarkVM/blob/2c4e282df46ed71c809fd4b49738fd78562354ac/vm/package/deploy.rs#L149
-
-    // for some reason a new process is needed, the package current one would fail
-    let process = Process::<Testnet3>::load()?;
-    let deployment = process.deploy::<AleoV0, _>(&program, rng)?;
+    let deployment = vm::generate_deployment(&program_string, &mut rng)?;
 
     // using a uuid for txid, just to skip having to use an additional fee record which now is necessary to run
     // Transaction::from_deployment
@@ -171,47 +159,17 @@ fn generate_deployment(path: &Path) -> Result<Transaction> {
     })
 }
 
-// TODO move the low level SnarkVM stuff to a helper vm module
 fn generate_execution(
     path: &Path,
-    function_name: Identifier<Testnet3>,
-    inputs: &[Value<Testnet3>],
+    function_name: vm::Identifier,
+    inputs: &[vm::Value],
     credentials: &account::Credentials,
 ) -> Result<Transaction> {
     let rng = &mut rand::thread_rng();
     let program_string = fs::read_to_string(path).unwrap();
-    let program = snarkvm::prelude::Program::from_str(&program_string).unwrap();
-    let program_id = program.id();
 
-    ensure!(
-        program.contains_function(&function_name),
-        "Function '{function_name}' does not exist."
-    );
-
-    let mut process = Process::<Testnet3>::load()?;
-    process.add_program(&program).unwrap();
-
-    // Synthesize each proving and verifying key.
-    for function_name in program.functions().keys() {
-        process.synthesize_key::<AleoV0, _>(program_id, function_name, &mut rand::thread_rng())?
-    }
-
-    debug!(
-        "executing program {} function {} inputs {:?}",
-        program, function_name, inputs
-    );
-
-    // Execute the circuit.
-    let authorization = process.authorize::<AleoV0, _>(
-        &credentials.private_key,
-        program_id,
-        function_name,
-        inputs,
-        rng,
-    )?;
-    let (response, execution) = process.execute::<AleoV0, _>(authorization, rng)?;
-
-    debug!("outputs {:?}", response.outputs());
+    let execution =
+        vm::generate_execution(&program_string, function_name, inputs, credentials, rng)?;
 
     // using uuid here too for consistency, although in the case of Transaction::from_execution the additional fee is optional
     let id = uuid::Uuid::new_v4().to_string();
