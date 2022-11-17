@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use snarkvm::prelude::{Deployment, Execution, Field, Origin, Output, Plaintext, Record, Testnet3};
+use snarkvm::prelude::{Deployment, Execution, Field, Origin, Plaintext, Record, Testnet3};
 
 pub mod account;
 pub mod vm;
@@ -31,16 +31,25 @@ impl Transaction {
         credentials: &account::Credentials,
     ) -> Result<Vec<Record<Testnet3, Plaintext<Testnet3>>>> {
         match self {
-            Transaction::Execution { mut execution, .. } => {
+            Transaction::Execution { execution, .. } => {
                 let mut decrypted_records = Vec::new();
-                while let Ok(transition) = execution.pop() {
-                    let mut outputs_iter = transition.outputs().iter();
 
-                    while let Some(Output::Record(_, _, Some(ciphertext))) = outputs_iter.next() {
-                        let record = ciphertext.decrypt(&credentials.view_key)?;
-                        decrypted_records.push(record);
-                    }
+                // Only decrypt the records owned by the current user.
+                for record in execution
+                    .iter()
+                    .flat_map(|transition| transition.output_records())
+                    .filter_map(|(_, record)| {
+                        if record.is_owner(&credentials.address, &credentials.view_key) {
+                            Some(record)
+                        } else {
+                            None
+                        }
+                    })
+                {
+                    let record = record.decrypt(&credentials.view_key)?;
+                    decrypted_records.push(record);
                 }
+
                 Ok(decrypted_records)
             }
             _ => bail!("Transaction is not an execution so it does not have records to decrypt"),
@@ -90,4 +99,10 @@ impl std::fmt::Display for Transaction {
             }
         }
     }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct GetDecryptionResponse {
+    pub execution: Transaction,
+    pub decrypted_records: Vec<Record<Testnet3, Plaintext<Testnet3>>>,
 }

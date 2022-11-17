@@ -1,11 +1,9 @@
 use anyhow::{anyhow, bail, ensure, Result};
 use clap::Parser;
 use commands::{Account, Command, Get, Program};
-use lib::vm::Record;
-use lib::{account, vm, Transaction};
+use lib::{account, vm, GetDecryptionResponse, Transaction};
 use log::debug;
 use rand::thread_rng;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -64,12 +62,6 @@ async fn main() {
             println!("{}", output);
         }
     }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct GetDecryptionResponse {
-    execution: Transaction,
-    decrypted_records: Vec<Record>,
 }
 
 // TODO move to command module
@@ -182,9 +174,9 @@ async fn broadcast_to_blockchain(transaction: &Transaction, url: &str) -> Result
 
     let client = HttpClient::new(url).unwrap();
 
-    let response = client
-        .broadcast_tx_sync(transaction_serialized.into())
-        .await?;
+    let tx: tendermint::abci::Transaction = transaction_serialized.into();
+
+    let response = client.broadcast_tx_sync(tx).await?;
 
     debug!("Response from CheckTx: {:?}", response);
     match response.code {

@@ -3,10 +3,10 @@ use assert_cmd::{
     Command,
 };
 use assert_fs::NamedTempFile;
-use lib::{account, Transaction};
+use lib::{account, GetDecryptionResponse, Transaction};
 use retry::{delay::Fixed, Error};
 use serde::de::DeserializeOwned;
-use snarkvm::prelude::Output;
+use snarkvm::prelude::{Identifier, Output};
 use std::fs;
 
 #[test]
@@ -127,6 +127,160 @@ fn program_validations() {
         .failure();
 }
 
+#[test]
+fn decrypt_records() {
+    let (acc_file, account) = new_account();
+    let (_program_file, program_path) = load_program("token");
+
+    let _ = Command::cargo_bin("client")
+        .unwrap()
+        .args(["program", "deploy", &program_path, "-f", &account])
+        .assert()
+        .success();
+
+    let credentials = account::Credentials::load(Some(acc_file.to_path_buf()))
+        .expect("error loading credentials from temp file");
+
+    let result = Command::cargo_bin("client")
+        .unwrap()
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "mint",
+            "1u64",
+            &credentials.address.to_string(),
+            "-f",
+            &account,
+        ])
+        .assert()
+        .success();
+
+    let transaction: Transaction = parse_output(result);
+
+    // test successful decryption of records (same credentials)
+    let result = eventually_get_tx(transaction.id(), Some(&account))
+        .unwrap()
+        .success();
+
+    let output: GetDecryptionResponse = parse_output(result);
+    let owner_address = format!("{}.private", credentials.address);
+    let record = &output.decrypted_records[0];
+    assert_eq!(record.owner().to_string(), owner_address);
+    let value = record
+        .data()
+        .get(&Identifier::try_from("amount").unwrap())
+        .unwrap();
+    assert_eq!(value.to_string(), "1u64.private");
+
+    let (_tempfile, account) = new_account();
+    let (_program_file, _) = load_program("token");
+
+    // should fail to decrypt records (different credentials)
+    let result = eventually_get_tx(transaction.id(), Some(&account))
+        .unwrap()
+        .success();
+    let output: GetDecryptionResponse = parse_output(result);
+    assert!(output.decrypted_records.is_empty());
+}
+
+#[test]
+fn token_transacction() {
+    // Create two accounts: Alice and Bob
+    let (tempfile_alice, alice) = new_account();
+    let (tempfile_bob, bob) = new_account();
+
+    // Load token program with Alice credentials
+    let (_program_file, program_path) = load_program("token");
+
+    // Deploy the token program to the blockchain
+    Command::cargo_bin("client")
+        .unwrap()
+        .args(["program", "deploy", &program_path, "-f", &alice])
+        .assert()
+        .success();
+
+    // Load Alice and Bob credentials
+    let alice_credentials = account::Credentials::load(Some(tempfile_alice.to_path_buf()))
+        .expect("error loading credentials from temp file");
+    let bob_credentials = account::Credentials::load(Some(tempfile_bob.to_path_buf()))
+        .expect("error loading credentials from temp file");
+
+    // Mint 10 tokens into an Alice Record
+    let result = Command::cargo_bin("client")
+        .unwrap()
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "mint",
+            "10u64",
+            &alice_credentials.address.to_string(),
+            "-f",
+            &alice,
+        ])
+        .assert()
+        .success();
+
+    // parse mint transacction output
+    let transaction: Transaction = parse_output(result);
+
+    // Get and decrypt te mint output record
+    let result = eventually_get_tx(transaction.id(), Some(&alice))
+        .unwrap()
+        .success();
+    let output: GetDecryptionResponse = parse_output(result);
+    let mint_record = &output.decrypted_records[0];
+
+    // Transfer 5 tokens from Alice to Bob
+    let output = Command::cargo_bin("client")
+        .unwrap()
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "transfer_amount",
+            &mint_record.to_string(),
+            &bob_credentials.address.to_string(),
+            "5u64",
+            "-f",
+            &alice,
+        ])
+        .assert()
+        .success();
+
+    // parse transfer transacction output
+    let transaction: Transaction = parse_output(output);
+
+    // Get, decrypt and assert correctness of Alice output record: Should have 5u64.private in the amount variable
+    let result = eventually_get_tx(transaction.id(), Some(&alice))
+        .unwrap()
+        .success();
+    let output: GetDecryptionResponse = parse_output(result);
+    let record = &output.decrypted_records[0];
+    let alice_address = format!("{}.private", alice_credentials.address);
+    assert_eq!(record.owner().to_string(), alice_address);
+    let value = record
+        .data()
+        .get(&Identifier::try_from("amount").unwrap())
+        .unwrap();
+    assert_eq!(value.to_string(), "5u64.private");
+
+    // Get, decrypt and assert correctness of Bob output record: Should have 5u64.private in the amount variable
+    let result = eventually_get_tx(transaction.id(), Some(&bob))
+        .unwrap()
+        .success();
+    let output: GetDecryptionResponse = parse_output(result);
+    let record = &output.decrypted_records[0];
+    let bob_address = format!("{}.private", bob_credentials.address);
+    assert_eq!(record.owner().to_string(), bob_address);
+    let value = record
+        .data()
+        .get(&Identifier::try_from("amount").unwrap())
+        .unwrap();
+    assert_eq!(value.to_string(), "5u64.private");
+}
+
 // HELPERS
 
 /// Retries iteratively to get a transaction until something returns
@@ -164,49 +318,6 @@ fn new_account() -> (NamedTempFile, String) {
         .success();
 
     (tempfile, path)
-}
-
-#[test]
-fn decrypt_records() {
-    let (acc_file, account) = new_account();
-    let (_program_file, program_path) = load_program("token");
-
-    let _ = Command::cargo_bin("client")
-        .unwrap()
-        .args(["program", "deploy", &program_path, "-f", &account])
-        .assert()
-        .success();
-
-    let credentials = account::Credentials::load(Some(acc_file.to_path_buf()))
-        .expect("error loading credentials from temp file");
-
-    let result = Command::cargo_bin("client")
-        .unwrap()
-        .args([
-            "program",
-            "execute",
-            &program_path,
-            "new",
-            "1u64",
-            &credentials.address.to_string(),
-            "-f",
-            &account,
-        ])
-        .assert()
-        .success();
-
-    let transaction: Transaction = parse_output(result);
-
-    // test successful decryption of records (same credentials)
-    let result = eventually_get_tx(transaction.id(), Some(&account));
-
-    result.unwrap().success();
-
-    let (_tempfile, account) = new_account();
-    let (_program_file, _) = load_program("token");
-
-    // should fail to decrypt records (different credentials)
-    eventually_get_tx(transaction.id(), Some(&account)).unwrap_err();
 }
 
 /// Load the source code from the given example file, and return a tempfile along with its path,
