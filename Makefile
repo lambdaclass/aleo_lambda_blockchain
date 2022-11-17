@@ -20,8 +20,10 @@ bin/tendermint:
 	cd .. && mv tendermint-install/tendermint bin/ && rm -rf tendermint-install
 
 # Run a tendermint node, installing it if necessary
+# Note: manually setting the max_body_bytes config here. if we need to update other values find a more visible/sustainable way.
 node: bin/tendermint
 	bin/tendermint init
+	sed -i.bak 's/max_body_bytes = 1000000/max_body_bytes = 10000000/g' ~/.tendermint/config/config.toml
 	bin/tendermint node --consensus.create_empty_blocks_interval="8s"
 
 # remove the blockchain data
@@ -35,7 +37,7 @@ abci:
 # run tests on release mode to ensure there is no extra printing to stdout
 test:
 	cargo test --release -- --nocapture
-  
+
 localnet-build-abci:
 	docker build -t snarkvm_abci .
 .PHONY: localnet-build-abci
