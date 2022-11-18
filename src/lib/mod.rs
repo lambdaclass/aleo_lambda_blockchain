@@ -1,19 +1,16 @@
-use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use snarkvm::prelude::{Deployment, Execution, Field, Origin, Plaintext, Record, Testnet3};
 
-pub mod account;
 pub mod vm;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Transaction {
     Deployment {
         id: String,
-        deployment: Box<Deployment<Testnet3>>,
+        deployment: Box<vm::Deployment>,
     },
     Execution {
         id: String,
-        execution: Execution<Testnet3>,
+        execution: vm::Execution,
     },
 }
 
@@ -26,33 +23,16 @@ impl Transaction {
     }
 
     /// Decrypts any available records and consumes the transaction object
-    pub fn decrypt_records(
-        self,
-        credentials: &account::Credentials,
-    ) -> Result<Vec<Record<Testnet3, Plaintext<Testnet3>>>> {
-        match self {
-            Transaction::Execution { execution, .. } => {
-                let mut decrypted_records = Vec::new();
-
-                // Only decrypt the records owned by the current user.
-                for record in execution
-                    .iter()
-                    .flat_map(|transition| transition.output_records())
-                    .filter_map(|(_, record)| {
-                        if record.is_owner(&credentials.address, &credentials.view_key) {
-                            Some(record)
-                        } else {
-                            None
-                        }
-                    })
-                {
-                    let record = record.decrypt(&credentials.view_key)?;
-                    decrypted_records.push(record);
-                }
-
-                Ok(decrypted_records)
-            }
-            _ => bail!("Transaction is not an execution so it does not have records to decrypt"),
+    pub fn decrypt_records(self, address: &vm::Address, view_key: &vm::ViewKey) -> Vec<vm::Record> {
+        if let Transaction::Execution { execution, .. } = self {
+            execution
+                .iter()
+                .flat_map(|transition| transition.output_records())
+                .filter(|(_, record)| record.is_owner(address, view_key))
+                .filter_map(|(_, record)| record.decrypt(view_key).ok())
+                .collect()
+        } else {
+            Vec::new()
         }
     }
 
@@ -67,13 +47,13 @@ impl Transaction {
 
     /// If the transaction is an execution, return the list of input record origins
     /// (in case they are record commitments).
-    pub fn origin_commitments(&self) -> Vec<&Field<Testnet3>> {
+    pub fn origin_commitments(&self) -> Vec<&vm::Field> {
         if let Transaction::Execution { ref execution, .. } = self {
             execution
                 .iter()
                 .flat_map(|transition| transition.origins())
                 .filter_map(|origin| {
-                    if let Origin::Commitment(commitment) = origin {
+                    if let vm::Origin::Commitment(commitment) = origin {
                         Some(commitment)
                     } else {
                         None
@@ -101,8 +81,9 @@ impl std::fmt::Display for Transaction {
     }
 }
 
+// this is here just to use it in tests, consider moving it
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct GetDecryptionResponse {
     pub execution: Transaction,
-    pub decrypted_records: Vec<Record<Testnet3, Plaintext<Testnet3>>>,
+    pub decrypted_records: Vec<vm::Record>,
 }

@@ -1,22 +1,23 @@
 use anyhow::{anyhow, Result};
+use lib::vm::{Address, PrivateKey, ViewKey};
 use log::debug;
 use serde::{Deserialize, Serialize};
-use snarkvm::prelude::Testnet3;
-use snarkvm::prelude::{Address, PrivateKey, ViewKey};
 use std::fs;
 use std::path::PathBuf;
+use std::str::FromStr;
 
-/// File that stores the public and private keys associated with an account
+/// File that stores the public and private keys associated with an account.
+/// Stores it at $ALEO_HOME/account.json, with ~/.aleo as the default ALEO_HOME.
 #[derive(Serialize, Deserialize)]
 pub struct Credentials {
-    pub private_key: PrivateKey<Testnet3>,
-    pub view_key: ViewKey<Testnet3>,
-    pub address: Address<Testnet3>,
+    pub private_key: PrivateKey,
+    pub view_key: ViewKey,
+    pub address: Address,
 }
 
 impl Credentials {
     pub fn new() -> Result<Self> {
-        let private_key = PrivateKey::<Testnet3>::new(&mut rand::thread_rng())?;
+        let private_key = PrivateKey::new(&mut rand::thread_rng())?;
         let view_key = ViewKey::try_from(&private_key)?;
         let address = Address::try_from(&view_key)?;
         Ok(Self {
@@ -26,8 +27,8 @@ impl Credentials {
         })
     }
 
-    pub fn save(&self, file: Option<PathBuf>) -> Result<PathBuf> {
-        let file = file.unwrap_or_else(Self::default_file);
+    pub fn save(&self) -> Result<PathBuf> {
+        let file = Self::path();
         let dir = file.parent().unwrap();
         fs::create_dir_all(dir)?;
         debug!("Saving credentials to {}", file.to_string_lossy());
@@ -36,12 +37,15 @@ impl Credentials {
         Ok(file)
     }
 
-    pub fn load(file: Option<PathBuf>) -> Result<Self> {
-        let account_json = fs::read_to_string(file.unwrap_or_else(Self::default_file))?;
+    pub fn load() -> Result<Self> {
+        let account_json = fs::read_to_string(Self::path())?;
         serde_json::from_str(&account_json).map_err(|e| anyhow!(e))
     }
 
-    fn default_file() -> PathBuf {
-        dirs::home_dir().unwrap().join(".aleo/account.json")
+    fn path() -> PathBuf {
+        std::env::var("ALEO_HOME")
+            .map(|path| PathBuf::from_str(&path).unwrap())
+            .unwrap_or_else(|_| dirs::home_dir().unwrap().join(".aleo"))
+            .join("account.json")
     }
 }

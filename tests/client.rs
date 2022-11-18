@@ -3,47 +3,44 @@ use assert_cmd::{
     Command,
 };
 use assert_fs::NamedTempFile;
-use lib::{account, GetDecryptionResponse, Transaction};
+use lib::{
+    vm::{Identifier, Output},
+    GetDecryptionResponse, Transaction,
+};
 use retry::{delay::Fixed, Error};
 use serde::de::DeserializeOwned;
-use snarkvm::prelude::{Identifier, Output};
-use std::fs;
+use std::{collections::HashMap, fs};
 
 #[test]
 fn basic_program() {
-    let (_tempfile, account) = new_account();
+    let (_tempfile, home_path) = &new_account();
 
     // deploy a program, save txid
     let (_program_file, program_path) = load_program("hello");
     let result = Command::cargo_bin("client")
         .unwrap()
-        .args(["program", "deploy", &program_path, "-f", &account])
+        .env("ALEO_HOME", home_path)
+        .args(["program", "deploy", &program_path])
         .assert()
         .success();
     let transaction: Transaction = parse_output(result);
 
     // get deployment tx, need to retry until it gets committed
-    assert!(eventually_get_tx(transaction.id(), None).is_ok());
+    retry_command(home_path, &["get", transaction.id()])
+        .unwrap()
+        .success();
 
     // execute the program, save txid
     let result = Command::cargo_bin("client")
         .unwrap()
-        .args([
-            "program",
-            "execute",
-            &program_path,
-            "hello",
-            "1u32",
-            "1u32",
-            "-f",
-            &account,
-        ])
+        .env("ALEO_HOME", home_path)
+        .args(["program", "execute", &program_path, "hello", "1u32", "1u32"])
         .assert()
         .success();
     let transaction: Transaction = parse_output(result);
 
     // get execution tx, assert expected output
-    let result = eventually_get_tx(transaction.id(), None);
+    let result = retry_command(home_path, &["get", transaction.id()]);
     let transaction: Transaction = parse_output(result.unwrap());
 
     // check the output of the execution is the sum of the inputs
@@ -63,41 +60,36 @@ fn basic_program() {
 
 #[test]
 fn program_validations() {
-    let (_tempfile, account) = new_account();
+    let (_tempfile, home_path) = &new_account();
     let (_program_file, program_path) = load_program("hello");
 
     // fail on execute non deployed command
     Command::cargo_bin("client")
         .unwrap()
-        .args([
-            "program",
-            "execute",
-            &program_path,
-            "hello",
-            "1u32",
-            "1u32",
-            "-f",
-            &account,
-        ])
+        .env("ALEO_HOME", home_path)
+        .args(["program", "execute", &program_path, "hello", "1u32", "1u32"])
         .assert()
         .failure();
 
     Command::cargo_bin("client")
         .unwrap()
-        .args(["program", "deploy", &program_path, "-f", &account])
+        .env("ALEO_HOME", home_path)
+        .args(["program", "deploy", &program_path])
         .assert()
         .success();
 
     // fail on already deployed
     Command::cargo_bin("client")
         .unwrap()
-        .args(["program", "deploy", &program_path, "-f", &account])
+        .env("ALEO_HOME", home_path)
+        .args(["program", "deploy", &program_path])
         .assert()
         .failure();
 
     // fail on unknown function
     Command::cargo_bin("client")
         .unwrap()
+        .env("ALEO_HOME", home_path)
         .args([
             "program",
             "execute",
@@ -105,8 +97,6 @@ fn program_validations() {
             "goodbye",
             "1u32",
             "1u32",
-            "-f",
-            &account,
         ])
         .assert()
         .failure();
@@ -114,57 +104,44 @@ fn program_validations() {
     // fail on missing parameter
     Command::cargo_bin("client")
         .unwrap()
-        .args([
-            "program",
-            "execute",
-            &program_path,
-            "hello",
-            "1u32",
-            "-f",
-            &account,
-        ])
+        .env("ALEO_HOME", home_path)
+        .args(["program", "execute", &program_path, "hello", "1u32"])
         .assert()
         .failure();
 }
 
 #[test]
 fn decrypt_records() {
-    let (acc_file, account) = new_account();
+    let (acc_file, home_path) = &new_account();
     let (_program_file, program_path) = load_program("token");
 
     let _ = Command::cargo_bin("client")
         .unwrap()
-        .args(["program", "deploy", &program_path, "-f", &account])
+        .args(["program", "deploy", &program_path])
+        .env("ALEO_HOME", home_path)
         .assert()
         .success();
 
-    let credentials = account::Credentials::load(Some(acc_file.to_path_buf()))
-        .expect("error loading credentials from temp file");
+    let account: HashMap<String, String> =
+        serde_json::from_str(&fs::read_to_string(acc_file).unwrap()).unwrap();
+    let address = account.get("address").unwrap();
 
     let result = Command::cargo_bin("client")
         .unwrap()
-        .args([
-            "program",
-            "execute",
-            &program_path,
-            "mint",
-            "1u64",
-            &credentials.address.to_string(),
-            "-f",
-            &account,
-        ])
+        .env("ALEO_HOME", home_path)
+        .args(["program", "execute", &program_path, "mint", "1u64", address])
         .assert()
         .success();
 
     let transaction: Transaction = parse_output(result);
 
     // test successful decryption of records (same credentials)
-    let result = eventually_get_tx(transaction.id(), Some(&account))
+    let result = retry_command(home_path, &["get", transaction.id(), "-d"])
         .unwrap()
         .success();
 
     let output: GetDecryptionResponse = parse_output(result);
-    let owner_address = format!("{}.private", credentials.address);
+    let owner_address = format!("{}.private", address);
     let record = &output.decrypted_records[0];
     assert_eq!(record.owner().to_string(), owner_address);
     let value = record
@@ -173,11 +150,10 @@ fn decrypt_records() {
         .unwrap();
     assert_eq!(value.to_string(), "1u64.private");
 
-    let (_tempfile, account) = new_account();
-    let (_program_file, _) = load_program("token");
+    let (_acc_file, home_path) = &new_account();
 
     // should fail to decrypt records (different credentials)
-    let result = eventually_get_tx(transaction.id(), Some(&account))
+    let result = retry_command(home_path, &["get", transaction.id(), "-d"])
         .unwrap()
         .success();
     let output: GetDecryptionResponse = parse_output(result);
@@ -185,10 +161,10 @@ fn decrypt_records() {
 }
 
 #[test]
-fn token_transacction() {
+fn token_transaction() {
     // Create two accounts: Alice and Bob
-    let (tempfile_alice, alice) = new_account();
-    let (tempfile_bob, bob) = new_account();
+    let (tempfile_alice, alice_home) = &new_account();
+    let (tempfile_bob, bob_home) = &new_account();
 
     // Load token program with Alice credentials
     let (_program_file, program_path) = load_program("token");
@@ -196,28 +172,28 @@ fn token_transacction() {
     // Deploy the token program to the blockchain
     Command::cargo_bin("client")
         .unwrap()
-        .args(["program", "deploy", &program_path, "-f", &alice])
+        .env("ALEO_HOME", alice_home)
+        .args(["program", "deploy", &program_path])
         .assert()
         .success();
 
     // Load Alice and Bob credentials
-    let alice_credentials = account::Credentials::load(Some(tempfile_alice.to_path_buf()))
-        .expect("error loading credentials from temp file");
-    let bob_credentials = account::Credentials::load(Some(tempfile_bob.to_path_buf()))
-        .expect("error loading credentials from temp file");
+    let alice_credentials: HashMap<String, String> =
+        serde_json::from_str(&fs::read_to_string(tempfile_alice).unwrap()).unwrap();
+    let bob_credentials: HashMap<String, String> =
+        serde_json::from_str(&fs::read_to_string(tempfile_bob).unwrap()).unwrap();
 
     // Mint 10 tokens into an Alice Record
     let result = Command::cargo_bin("client")
         .unwrap()
+        .env("ALEO_HOME", alice_home)
         .args([
             "program",
             "execute",
             &program_path,
             "mint",
             "10u64",
-            &alice_credentials.address.to_string(),
-            "-f",
-            &alice,
+            alice_credentials.get("address").unwrap(),
         ])
         .assert()
         .success();
@@ -226,7 +202,7 @@ fn token_transacction() {
     let transaction: Transaction = parse_output(result);
 
     // Get and decrypt te mint output record
-    let result = eventually_get_tx(transaction.id(), Some(&alice))
+    let result = retry_command(alice_home, &["get", transaction.id(), "-d"])
         .unwrap()
         .success();
     let output: GetDecryptionResponse = parse_output(result);
@@ -235,16 +211,15 @@ fn token_transacction() {
     // Transfer 5 tokens from Alice to Bob
     let output = Command::cargo_bin("client")
         .unwrap()
+        .env("ALEO_HOME", alice_home)
         .args([
             "program",
             "execute",
             &program_path,
             "transfer_amount",
             &mint_record.to_string(),
-            &bob_credentials.address.to_string(),
+            bob_credentials.get("address").unwrap(),
             "5u64",
-            "-f",
-            &alice,
         ])
         .assert()
         .success();
@@ -253,12 +228,12 @@ fn token_transacction() {
     let transaction: Transaction = parse_output(output);
 
     // Get, decrypt and assert correctness of Alice output record: Should have 5u64.private in the amount variable
-    let result = eventually_get_tx(transaction.id(), Some(&alice))
+    let result = retry_command(alice_home, &["get", transaction.id(), "-d"])
         .unwrap()
         .success();
     let output: GetDecryptionResponse = parse_output(result);
     let record = &output.decrypted_records[0];
-    let alice_address = format!("{}.private", alice_credentials.address);
+    let alice_address = format!("{}.private", alice_credentials.get("address").unwrap());
     assert_eq!(record.owner().to_string(), alice_address);
     let value = record
         .data()
@@ -267,12 +242,12 @@ fn token_transacction() {
     assert_eq!(value.to_string(), "5u64.private");
 
     // Get, decrypt and assert correctness of Bob output record: Should have 5u64.private in the amount variable
-    let result = eventually_get_tx(transaction.id(), Some(&bob))
+    let result = retry_command(bob_home, &["get", transaction.id(), "-d"])
         .unwrap()
         .success();
     let output: GetDecryptionResponse = parse_output(result);
     let record = &output.decrypted_records[0];
-    let bob_address = format!("{}.private", bob_credentials.address);
+    let bob_address = format!("{}.private", bob_credentials.get("address").unwrap());
     assert_eq!(record.owner().to_string(), bob_address);
     let value = record
         .data()
@@ -281,43 +256,60 @@ fn token_transacction() {
     assert_eq!(value.to_string(), "5u64.private");
 }
 
+#[test]
+fn spend_records() {
+    // TODO
+
+    // new account41
+    // deploy "records" program
+
+    // execute mint
+    // get output record
+
+    // execute consume with output record
+    // execution succeeds
+
+    // execute consume with same output record
+    // execution fails, no double spend
+
+    // execute with made output record
+    // execution fails, no use unknown record
+}
+
 // HELPERS
 
 /// Retries iteratively to get a transaction until something returns
-/// If `decrypt_cred_file` is Some(val), it uses the val as the credentials file in order to get the required credentials to attempt decryption
-fn eventually_get_tx(
-    transaction_id: &str,
-    decrypt_cred_file: Option<&str>,
-) -> Result<Assert, Error<AssertError>> {
-    let mut args = vec!["get", transaction_id];
-    decrypt_cred_file.is_some().then(|| {
-        args.push("-d");
-        args.push("-f");
-        args.push(decrypt_cred_file.unwrap());
-    });
-
+/// If `home_path` is Some(val), it uses the val as the credentials file in order to get the required credentials to attempt decryption
+fn retry_command(home_path: &str, args: &[&str]) -> Result<Assert, Error<AssertError>> {
     retry::retry(Fixed::from_millis(1000).take(5), || {
         Command::cargo_bin("client")
             .unwrap()
-            .args(&args)
+            .env("ALEO_HOME", home_path)
+            .args(args)
             .assert()
             .try_success()
     })
 }
 
-/// Generate a tempfile with account credentials and return it along with its path.
+/// Generate a tempfile with account credentials and return it along with the aleo home path.
 /// The file will be removed when it goes out of scope.
 fn new_account() -> (NamedTempFile, String) {
-    let tempfile = NamedTempFile::new("account.json").unwrap();
-    let path = tempfile.path().to_string_lossy().to_string();
+    let tempfile = NamedTempFile::new(".aleo/account.json").unwrap();
+    let aleo_path = tempfile
+        .path()
+        .parent()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
 
     Command::cargo_bin("client")
         .unwrap()
-        .args(["account", "new", "-f", &path])
+        .env("ALEO_HOME", aleo_path.clone())
+        .args(["account", "new"])
         .assert()
         .success();
 
-    (tempfile, path)
+    (tempfile, aleo_path)
 }
 
 /// Load the source code from the given example file, and return a tempfile along with its path,

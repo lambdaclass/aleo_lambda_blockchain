@@ -1,17 +1,18 @@
 use anyhow::{anyhow, bail, ensure, Result};
 use clap::Parser;
 use commands::{Account, Command, Get, Program};
-use lib::{account, vm, GetDecryptionResponse, Transaction};
+use lib::{vm, GetDecryptionResponse, Transaction};
 use log::debug;
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tendermint_rpc::query::Query;
 use tendermint_rpc::{Client, HttpClient, Order};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
+pub mod account;
 mod commands;
 
 /// Default tendermint url
@@ -23,10 +24,6 @@ pub struct Cli {
     /// Specify a subcommand.
     #[clap(subcommand)]
     command: Command,
-
-    /// The account credentials file.
-    #[clap(short, long, global = true)]
-    file: Option<PathBuf>,
 
     /// Output log lines to stdout based on the desired log level (RUST_LOG env var).
     #[clap(short, long, global = false)]
@@ -51,7 +48,7 @@ async fn main() {
             .init();
     }
 
-    match run(cli.command, cli.file, cli.url).await {
+    match run(cli.command, cli.url).await {
         Err(err) => {
             let mut output = HashMap::new();
             output.insert("error", err.to_string());
@@ -65,11 +62,10 @@ async fn main() {
 }
 
 // TODO move to command module
-async fn run(command: Command, account_file: Option<PathBuf>, url: String) -> Result<String> {
+async fn run(command: Command, url: String) -> Result<String> {
     let output = match command {
         Command::Account(Account::New) => {
-            let account = account::Credentials::new()?;
-            let path = account.save(account_file)?;
+            let path = account::Credentials::new()?.save()?;
             format!("Saved credentials to {}", path.to_string_lossy())
         }
         Command::Program(Program::Deploy { path }) => {
@@ -82,8 +78,8 @@ async fn run(command: Command, account_file: Option<PathBuf>, url: String) -> Re
             function,
             inputs,
         }) => {
-            let credentials = account::Credentials::load(account_file)
-                .map_err(|_| anyhow!("credentials not found"))?;
+            let credentials =
+                account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
 
             let transaction = generate_execution(&path, function, &inputs, &credentials)?;
             broadcast_to_blockchain(&transaction, &url).await?;
@@ -98,8 +94,10 @@ async fn run(command: Command, account_file: Option<PathBuf>, url: String) -> Re
             if !decrypt {
                 transaction.json()
             } else {
-                let credentials = account::Credentials::load(account_file)?;
-                let records = transaction.clone().decrypt_records(&credentials)?;
+                let credentials = account::Credentials::load()?;
+                let records = transaction
+                    .clone()
+                    .decrypt_records(&credentials.address, &credentials.view_key);
 
                 serde_json::to_string_pretty(&GetDecryptionResponse {
                     execution: transaction,
@@ -160,8 +158,13 @@ fn generate_execution(
     let rng = &mut rand::thread_rng();
     let program_string = fs::read_to_string(path).unwrap();
 
-    let execution =
-        vm::generate_execution(&program_string, function_name, inputs, credentials, rng)?;
+    let execution = vm::generate_execution(
+        &program_string,
+        function_name,
+        inputs,
+        &credentials.private_key,
+        rng,
+    )?;
 
     // using uuid here too for consistency, although in the case of Transaction::from_execution the additional fee is optional
     let id = uuid::Uuid::new_v4().to_string();
@@ -181,9 +184,8 @@ async fn broadcast_to_blockchain(transaction: &Transaction, url: &str) -> Result
     debug!("Response from CheckTx: {:?}", response);
     match response.code {
         tendermint::abci::Code::Ok => Ok(()),
-        tendermint::abci::Code::Err(v) => bail!(
-            "Transaction failed to validate (CheckTx response status code: {})",
-            v
-        ),
+        tendermint::abci::Code::Err(code) => {
+            bail!("Error executing transaction {}: {}", code, response.log)
+        }
     }
 }

@@ -1,6 +1,9 @@
+use crate::account;
+use anyhow::Result;
 use clap::Parser;
-use lib::vm::{Address, Identifier, Value};
+use lib::vm::{Address, EncryptedRecord, Identifier, Record, Value};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Commands to manage accounts.
 #[derive(Debug, Parser)]
@@ -45,7 +48,7 @@ pub enum Program {
         #[clap(value_parser)]
         function: Identifier,
         /// The function inputs.
-        #[clap(value_parser)]
+        #[clap(value_parser=parse_input_value)]
         inputs: Vec<Value>,
     },
 }
@@ -71,4 +74,23 @@ pub enum Command {
     Program(Program),
     #[clap(name = "get")]
     Get(Get),
+}
+/// Extends the snarkvm's default argument parsing to support using record ciphertexts as record inputs
+pub fn parse_input_value(input: &str) -> Result<Value> {
+    // try parsing an encrypted record string
+    if input.starts_with("record") {
+        let credentials = account::Credentials::load()?;
+        let ciphertext = EncryptedRecord::from_str(input)?;
+        let record = ciphertext.decrypt(&credentials.view_key)?;
+        return Ok(Value::Record(record));
+    }
+
+    // try parsing a jsonified plaintext record
+    let result = serde_json::from_str::<Record>(input);
+    if let Ok(record) = result {
+        return Ok(Value::Record(record));
+    }
+
+    // otherwise fallback to parsing a snarkvm literal
+    Value::from_str(input)
 }

@@ -15,18 +15,24 @@ use snarkvm::{
 
 use snarkvm::prelude::One;
 
-use crate::account;
-
 pub type Address = snarkvm::prelude::Address<Testnet3>;
 pub type Identifier = snarkvm::prelude::Identifier<Testnet3>;
 pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Value = snarkvm::prelude::Value<Testnet3>;
 pub type Program = snarkvm::prelude::Program<Testnet3>;
+pub type Ciphertext = snarkvm::prelude::Ciphertext<Testnet3>;
 pub type Stack = snarkvm::prelude::Stack<Testnet3>;
 pub type Process = snarkvm::prelude::Process<Testnet3>;
 pub type Execution = snarkvm::prelude::Execution<Testnet3>;
 pub type UniversalSRS = snarkvm::prelude::UniversalSRS<Testnet3>;
 pub type Record = snarkvm::prelude::Record<Testnet3, snarkvm::prelude::Plaintext<Testnet3>>;
+pub type EncryptedRecord = snarkvm::prelude::Record<Testnet3, Ciphertext>;
+pub type ViewKey = snarkvm::prelude::ViewKey<Testnet3>;
+pub type PrivateKey = snarkvm::prelude::PrivateKey<Testnet3>;
+pub type Field = snarkvm::prelude::Field<Testnet3>;
+pub type Origin = snarkvm::prelude::Origin<Testnet3>;
+pub type Output = snarkvm::prelude::Output<Testnet3>;
+pub type ProgramID = snarkvm::prelude::ProgramID<Testnet3>;
 
 // TODO: keeping Process here as a parameter mainly for the ABCI to use, but it has to be removed
 // in favor of a more general program store
@@ -241,7 +247,7 @@ pub fn generate_execution(
     program_string: &str,
     function_name: Identifier,
     inputs: &[Value],
-    credentials: &account::Credentials,
+    private_key: &PrivateKey,
     rng: &mut ThreadRng,
 ) -> Result<Execution> {
     let program: Program = snarkvm::prelude::Program::from_str(program_string).unwrap();
@@ -271,13 +277,8 @@ pub fn generate_execution(
     );
 
     // Execute the circuit.
-    let authorization = process.authorize::<AleoV0, _>(
-        &credentials.private_key,
-        program_id,
-        function_name,
-        inputs,
-        rng,
-    )?;
+    let authorization =
+        process.authorize::<AleoV0, _>(private_key, program_id, function_name, inputs, rng)?;
     let (response, execution) = process.execute::<AleoV0, _>(authorization, rng)?;
 
     debug!("outputs {:?}", response.outputs());

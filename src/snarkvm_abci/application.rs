@@ -201,7 +201,7 @@ impl SnarkVMApp {
         let commitments = transaction.origin_commitments();
         if let Some(commitment) = commitments.iter().duplicates().next() {
             bail!(
-                "Input record commitment {} in transaction {} is duplicate",
+                "input record commitment {} in transaction {} is duplicate",
                 commitment,
                 transaction.id()
             );
@@ -217,7 +217,10 @@ impl SnarkVMApp {
             .iter()
             .find(|commitment| !self.records.is_unspent(commitment).unwrap_or(true));
         if let Some(commitment) = already_spent {
-            bail!("input record {} is not unspent", commitment)
+            bail!(
+                "input record commitment {} is unknown or already spent",
+                commitment
+            )
         }
         Ok(())
     }
@@ -230,7 +233,7 @@ impl SnarkVMApp {
             .iter()
             .map(|commitment| self.records.spend(commitment))
             .find(|result| result.is_err())
-            .unwrap_or_else(|| Ok(()))
+            .unwrap_or(Ok(()))
     }
 
     /// Add the tranasction output records as unspent in the record store.
@@ -241,7 +244,7 @@ impl SnarkVMApp {
                 .flat_map(|transition| transition.output_records())
                 .map(|(commitment, record)| self.records.add(*commitment, record.clone()))
                 .find(|result| result.is_err())
-                .unwrap_or_else(|| Ok(()))
+                .unwrap_or(Ok(()))
         } else {
             Ok(())
         }

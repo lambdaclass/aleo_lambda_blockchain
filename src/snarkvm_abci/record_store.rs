@@ -2,15 +2,12 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 
+use lib::vm::{Ciphertext, EncryptedRecord, Field as Commitment, ViewKey};
 use log::error;
 use rocksdb::WriteBatch;
-use snarkvm::prelude::{Field, Testnet3, ViewKey};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
 
-pub type Commitment = Field<Testnet3>;
-pub type Ciphertext = snarkvm::prelude::Ciphertext<Testnet3>;
-pub type Record = snarkvm::prelude::Record<Testnet3, Ciphertext>;
 type Key = Vec<u8>;
 type Value = Vec<u8>;
 
@@ -148,7 +145,7 @@ impl RecordStore {
     }
 
     /// Saves a new unspent record to the write buffer
-    pub fn add(&self, commitment: Commitment, record: Record) -> Result<()> {
+    pub fn add(&self, commitment: Commitment, record: EncryptedRecord) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         let commitment = commitment.to_string().into_bytes();
@@ -189,7 +186,7 @@ impl RecordStore {
     /// Given an account view key, return up to `limit` record ciphertexts
     pub fn scan(
         &self,
-        _view_key: ViewKey<Testnet3>,
+        _view_key: ViewKey,
         _from: Option<Key>,
         _limit: usize,
     ) -> Result<(Vec<Ciphertext>, Key)> {
@@ -204,11 +201,11 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use snarkvm::prelude::{Identifier, Network, Plaintext, ProgramID, Uniform};
+    use snarkvm::prelude::{Identifier, Network, ProgramID, Testnet3, Uniform};
 
     use super::*;
     use std::{fs, str::FromStr};
-    type PublicRecord = snarkvm::prelude::Record<Testnet3, Plaintext<Testnet3>>;
+    type PublicRecord = lib::vm::Record;
 
     #[ctor::ctor]
     fn init() {
@@ -371,15 +368,15 @@ mod tests {
         std::mem::forget(store);
     }
 
-    fn new_record() -> (Record, Commitment) {
+    fn new_record() -> (EncryptedRecord, Commitment) {
         let rng = &mut rand::thread_rng();
         let randomizer = Uniform::rand(rng);
         let nonce = Testnet3::g_scalar_multiply(&randomizer);
         let record = PublicRecord::from_str(
             &format!("{{ owner: aleo1d5hg2z3ma00382pngntdp68e74zv54jdxy249qhaujhks9c72yrs33ddah.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {}.public }}", nonce),
         ).unwrap();
-        let program_id = ProgramID::<Testnet3>::from_str("foo.aleo").unwrap();
-        let name = Identifier::<Testnet3>::from_str("bar").unwrap();
+        let program_id = ProgramID::from_str("foo.aleo").unwrap();
+        let name = Identifier::from_str("bar").unwrap();
         let commitment = record.to_commitment(&program_id, &name).unwrap();
         let record_ciphertext = record.encrypt(randomizer).unwrap();
         (record_ciphertext, commitment)
