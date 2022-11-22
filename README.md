@@ -172,3 +172,25 @@ make localnet-reset
 ```
 
 or delete all the `node{_}` dirs to remove local `snarkvm_abci` data (it will require to download all the parameters on next run)
+
+## Design
+
+The diagram below describes the current architecture of the system:
+
+![This is an image](doc/architecture.png)
+
+* The blockchain nodes run in a peer to peer network where each node contains a Tendermint core and an application process.
+* Tendermint core handles the basic functions of a blockchain: p2p networking, receiving transactions and relying them to peers, running a consensus algorithm to propose and vote for blocks and keeping a ledger of committed transactions.
+* The application tracks application-specific logic and state. The state is derived from the transactions seen by the node (in our case, the set of spent and unspent records, and the deployed program certificates). The logic includes validating the execution transactions by verifying their proofs.
+* The application is isolated from the outer world and communicates exclusively with the tendermint process through specific hooks of the Application Blockchain Interface (abci). For example: the `CheckTx` hook is used to validate transactions before putting them in the local mempool and relaying them to the peers, the `DeliverTx` writes application state changes derived from transactions included in a block and the `Commit` hook applies those changes when the block is committed to the ledger.
+
+These interactions between tendermint core and the application are depicted below:
+
+<img src="doc/abci.png" width="640">
+
+For a diagram of the the consensus protocol check the [tendermint documentation](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview).
+
+Below are sequence diagrams of deployment and execution transactions.
+
+TODO deploy sequence diagram
+TODO execution sequence diagram
