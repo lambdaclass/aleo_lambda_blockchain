@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, ensure, Result};
 use clap::Parser;
 use commands::{Account, Command, Get, Program};
-use lib::{vm, GetDecryptionResponse, Transaction};
+use lib::{transaction::Transaction, vm, GetDecryptionResponse};
 use log::debug;
 use rand::thread_rng;
 use std::collections::HashMap;
@@ -96,8 +96,11 @@ async fn run(command: Command, url: String) -> Result<String> {
             } else {
                 let credentials = account::Credentials::load()?;
                 let records = transaction
-                    .clone()
-                    .decrypt_records(&credentials.address, &credentials.view_key);
+                    .output_records()
+                    .iter()
+                    .filter(|record| record.is_owner(&credentials.address, &credentials.view_key))
+                    .filter_map(|record| record.decrypt(&credentials.view_key).ok())
+                    .collect();
 
                 serde_json::to_string_pretty(&GetDecryptionResponse {
                     execution: transaction,

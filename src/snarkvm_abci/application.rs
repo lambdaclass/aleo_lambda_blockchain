@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use lib::{
+    transaction::Transaction,
     vm::{self, Process},
-    Transaction,
 };
 use snarkvm::prelude::Itertools;
 use std::{

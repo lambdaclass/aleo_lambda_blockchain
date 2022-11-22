@@ -4,8 +4,9 @@ use assert_cmd::{
 };
 use assert_fs::NamedTempFile;
 use lib::{
+    transaction::Transaction,
     vm::{Identifier, Output},
-    GetDecryptionResponse, Transaction,
+    GetDecryptionResponse,
 };
 use rand::Rng;
 use retry::{delay::Fixed, Error};
@@ -203,11 +204,11 @@ fn token_transaction() {
     let transaction: Transaction = parse_output(result);
 
     // Get and decrypt te mint output record
-    let result = retry_command(alice_home, &["get", transaction.id(), "-d"])
+    let result = retry_command(alice_home, &["get", transaction.id()])
         .unwrap()
         .success();
-    let output: GetDecryptionResponse = parse_output(result);
-    let mint_record = &output.decrypted_records[0];
+
+    let tx: Transaction = parse_output(result);
 
     // Transfer 5 tokens from Alice to Bob
     let output = Command::cargo_bin("client")
@@ -218,7 +219,7 @@ fn token_transaction() {
             "execute",
             &program_path,
             "transfer_amount",
-            &mint_record.to_string(),
+            &tx.output_records()[0].to_string(),
             bob_credentials.get("address").unwrap(),
             "5u64",
         ])
@@ -298,11 +299,11 @@ fn consume_records() {
     let transaction: Transaction = parse_output(output);
 
     // Get and decrypt te mint output record
-    let result = retry_command(home_path, &["get", transaction.id(), "-d"])
+    let result = retry_command(home_path, &["get", transaction.id()])
         .unwrap()
         .success();
-    let output: GetDecryptionResponse = parse_output(result);
-    let mint_record = &output.decrypted_records[0];
+
+    let tx: Transaction = parse_output(result);
 
     // execute consume with output record
     Command::cargo_bin("client")
@@ -313,7 +314,7 @@ fn consume_records() {
             "execute",
             &program_path,
             "consume",
-            &mint_record.to_string(),
+            &tx.output_records()[0].to_string(),
         ])
         .assert()
         .success();
@@ -327,7 +328,7 @@ fn consume_records() {
             "execute",
             &program_path,
             "consume",
-            &mint_record.to_string(),
+            &tx.output_records()[0].to_string(),
         ])
         .assert()
         .failure();
