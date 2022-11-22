@@ -7,6 +7,7 @@ use lib::{
     vm::{Identifier, Output},
     GetDecryptionResponse, Transaction,
 };
+use rand::Rng;
 use retry::{delay::Fixed, Error};
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, fs};
@@ -257,23 +258,101 @@ fn token_transaction() {
 }
 
 #[test]
-fn spend_records() {
-    // TODO
-
+fn consume_records() {
     // new account41
+    let (acc_file, home_path) = &new_account();
+
+    // load "records" program
+    let (_program_file, program_path) = load_program("records");
+
     // deploy "records" program
+    Command::cargo_bin("client")
+        .unwrap()
+        .args(["program", "deploy", &program_path])
+        .env("ALEO_HOME", home_path)
+        .assert()
+        .success();
+
+    // get account address
+    let account: HashMap<String, String> =
+        serde_json::from_str(&fs::read_to_string(acc_file).unwrap()).unwrap();
+
+    let address = account.get("address").unwrap();
 
     // execute mint
-    // get output record
+    let output = Command::cargo_bin("client")
+        .unwrap()
+        .env("ALEO_HOME", home_path)
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "mint",
+            "10u64",
+            address,
+        ])
+        .assert()
+        .success();
+
+    // parse tx
+    let transaction: Transaction = parse_output(output);
+
+    // Get and decrypt te mint output record
+    let result = retry_command(home_path, &["get", transaction.id(), "-d"])
+        .unwrap()
+        .success();
+    let output: GetDecryptionResponse = parse_output(result);
+    let mint_record = &output.decrypted_records[0];
 
     // execute consume with output record
-    // execution succeeds
+    Command::cargo_bin("client")
+        .unwrap()
+        .env("ALEO_HOME", home_path)
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "consume",
+            &mint_record.to_string(),
+        ])
+        .assert()
+        .success();
 
-    // execute consume with same output record
-    // execution fails, no double spend
+    // execute consume with same output record, execution fails, no double spend
+    Command::cargo_bin("client")
+        .unwrap()
+        .env("ALEO_HOME", home_path)
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "consume",
+            &mint_record.to_string(),
+        ])
+        .assert()
+        .failure();
 
-    // execute with made output record
-    // execution fails, no use unknown record
+    // create a fake record
+    let (new_acc_file, new_home_path) = &new_account();
+
+    let new_account: HashMap<String, String> =
+        serde_json::from_str(&fs::read_to_string(new_acc_file).unwrap()).unwrap();
+
+    let address = new_account.get("address").unwrap();
+
+    let record = format!(
+        "{{owner: {}.private,gates: 0u64.private,amount: 10u64.public,_nonce:{}}}",
+        address,
+        random_nonce()
+    );
+
+    // execute with made output record, execution fails, no use unknown record
+    Command::cargo_bin("client")
+        .unwrap()
+        .env("ALEO_HOME", new_home_path)
+        .args(["program", "execute", &program_path, "consume", &record])
+        .assert()
+        .failure();
 }
 
 // HELPERS
@@ -289,6 +368,22 @@ fn retry_command(home_path: &str, args: &[&str]) -> Result<Assert, Error<AssertE
             .assert()
             .try_success()
     })
+}
+
+fn random_nonce() -> String {
+    const CHARSET: &[u8] = b"0123456789";
+    const NONCE_LENGTH: usize = 80;
+
+    let mut rng = rand::thread_rng();
+
+    let nonce: String = (0..NONCE_LENGTH)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect();
+
+    format!("{}group.public", nonce)
 }
 
 /// Generate a tempfile with account credentials and return it along with the aleo home path.

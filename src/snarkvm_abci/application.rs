@@ -230,7 +230,7 @@ impl SnarkVMApp {
             .iter()
             .map(|commitment| self.records.spend(commitment))
             .find(|result| result.is_err())
-            .unwrap_or(Ok(()))
+            .unwrap_or_else(|| Ok(()))
     }
 
     /// Add the tranasction output records as unspent in the record store.
@@ -241,7 +241,7 @@ impl SnarkVMApp {
                 .flat_map(|transition| transition.output_records())
                 .map(|(commitment, record)| self.records.add(*commitment, record.clone()))
                 .find(|result| result.is_err())
-                .unwrap_or(Ok(()))
+                .unwrap_or_else(|| Ok(()))
         } else {
             Ok(())
         }
