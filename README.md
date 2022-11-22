@@ -194,3 +194,8 @@ Below are sequence diagrams of deployment and execution transactions.
 
 TODO deploy sequence diagram
 TODO execution sequence diagram
+
+## Implementation notes
+
+* [ABCI overview](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview)
+* [About why app hash is needed](https://github.com/tendermint/tendermint/issues/1179). Also [this](https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/apps.md#query-proofs).

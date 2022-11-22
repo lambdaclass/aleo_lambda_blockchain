@@ -28,6 +28,8 @@ node: bin/tendermint
 
 # remove the blockchain data
 reset: bin/tendermint
+	rm -rf *.db/
+	rm -f abci.height
 	bin/tendermint unsafe_reset_all
 
 # run the snarkvm tendermint application

@@ -1,5 +1,4 @@
 use anyhow::{anyhow, bail, Result};
-use bytes::BytesMut;
 use lib::{
     vm::{self, Process},
     Transaction,
@@ -17,13 +16,6 @@ use tendermint_proto::abci::{
 use tracing::{debug, error, info};
 
 use crate::record_store::RecordStore;
-
-// NOTE: in the sample app, the following const was defined on one of the internal libraries, but was not `pub`
-// so we had to extract it here
-
-/// The maximum number of bytes we expect in a varint. We use this to check if
-/// we're encountering a decoding error for a varint.
-pub const MAX_VARINT_LENGTH: usize = 16;
 
 /// An Tendermint ABCI application that works with a SnarkVM backend.
 /// This struct implements the ABCI application hooks, forwarding commands through
@@ -44,16 +36,14 @@ impl Application for SnarkVMApp {
             request.version, request.block_version, request.p2p_version
         );
 
-        let (result_tx, result_rx) = channel();
-        channel_send(&self.cmd_tx, Command::GetInfo { result_tx }).unwrap();
-        let (last_block_height, last_block_app_hash) = channel_recv(&result_rx).unwrap();
-
         ResponseInfo {
             data: "snarkvm-app".to_string(),
             version: "0.1.0".to_string(),
             app_version: 1,
-            last_block_height,
-            last_block_app_hash,
+            last_block_height: HeightFile::read_or_create(),
+
+            // using a fixed hash, see the commit() hook
+            last_block_app_hash: vec![],
         }
     }
 
@@ -162,18 +152,25 @@ impl Application for SnarkVMApp {
     /// The result includes a hash of the application state which will be included in the block header.
     /// This hash should be deterministic, different app state hashes will produce blockchain forks.
     fn commit(&self) -> ResponseCommit {
-        // TODO the app hash should either consider the record and program state
-        // or maybe calculate some digest of each committed transaction
+        // the app hash is intended to capture the state of the application that's not contained directly
+        // in the blockchain transactions (as tendermint already accounts for that with other hashes).
+        // we could do something in the RecordStore and ProgramStore to track state changes there and
+        // calculate a hash based on that, if we expected some aspect of that data not to be completely
+        // determined by the list of committed transactions (for example if we expected different versions
+        // of the app with differing logic to coexist). At this stage it seems overkill to add support for that
+        // scenario so we just to use a fixed hash. See below for more discussion on the use of app hash:
+        // https://github.com/tendermint/tendermint/issues/1179
+        // https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/apps.md#query-proofs
+        let app_hash = vec![];
 
         // apply pending changes in the record store: mark used records as spent, add inputs as unspent
         if let Err(err) = self.records.commit() {
             error!("Failure while committing the record store {}", err);
         }
 
-        let (result_tx, result_rx) = channel();
-        channel_send(&self.cmd_tx, Command::Commit { result_tx }).unwrap();
-        let (height, app_hash) = channel_recv(&result_rx).unwrap();
-        info!("Committed height {}", height);
+        let height = HeightFile::increment();
+
+        info!("Committing height {}", height);
         ResponseCommit {
             data: app_hash,
             retain_height: 0,
@@ -288,14 +285,6 @@ pub struct SnarkVMDriver {
     /// The SnarkVM Process keeps track of in-memory application state such as the verifying keys of deployed program's functions.
     process: Process,
 
-    // TODO consider an atomic type for this
-    /// The last known height of the blockchain. Required by Tendermint to track potential drift between the ABCI and the blockchain.
-    height: i64,
-
-    /// A hash of the current application state. Required by Tendermint to track inconsistencies between the blockchain and the app
-    /// (inconsistencies will be treated as blockchain forks by Tendermint.)
-    app_hash: Vec<u8>,
-
     /// Used to listen for commands from the ABCI application
     cmd_rx: Receiver<Command>,
 }
@@ -304,8 +293,6 @@ impl SnarkVMDriver {
     fn new(cmd_rx: Receiver<Command>) -> Self {
         Self {
             process: Process::load().unwrap(),
-            height: 0,
-            app_hash: vec![0_u8; MAX_VARINT_LENGTH],
             cmd_rx,
         }
     }
@@ -315,9 +302,6 @@ impl SnarkVMDriver {
         loop {
             let cmd = self.cmd_rx.recv().map_err(|e| anyhow!("{}", e))?;
             match cmd {
-                Command::GetInfo { result_tx } => {
-                    channel_send(&result_tx, (self.height, self.app_hash.clone()))?;
-                }
                 Command::VerifyTransaction {
                     transaction,
                     result_tx,
@@ -330,7 +314,6 @@ impl SnarkVMDriver {
                 } => {
                     channel_send(&result_tx, self.finalize(transaction))?;
                 }
-                Command::Commit { result_tx } => self.commit(&result_tx)?,
             }
         }
     }
@@ -367,22 +350,36 @@ impl SnarkVMDriver {
         };
         result
     }
+}
 
-    fn commit(&mut self, result_tx: &Sender<(i64, Vec<u8>)>) -> Result<()> {
-        // As in the Go-based key/value store, simply encode the number of
-        // items as the "app hash"
-        let app_hash = BytesMut::with_capacity(MAX_VARINT_LENGTH);
-        //prost::encoding::encode_varint(self.store.len() as u64, &mut app_hash);
-        self.app_hash = app_hash.to_vec();
-        self.height += 1;
-        channel_send(result_tx, (self.height, self.app_hash.clone()))
+/// Local file used to track the last block height seen by the abci application.
+struct HeightFile;
+
+impl HeightFile {
+    const PATH: &str = "abci.height";
+
+    fn read_or_create() -> i64 {
+        // if height file is missing or unreadable, create a new one from zero height
+        if let Ok(bytes) = std::fs::read(Self::PATH) {
+            // if contents are not readable, crash intentionally
+            bincode::deserialize(&bytes).unwrap()
+        } else {
+            std::fs::write(Self::PATH, bincode::serialize(&0i64).unwrap()).unwrap();
+            0i64
+        }
+    }
+
+    fn increment() -> i64 {
+        // if the file is missing or contents are unexpected, we crash intentionally;
+        let mut height: i64 = bincode::deserialize(&std::fs::read(Self::PATH).unwrap()).unwrap();
+        height += 1;
+        std::fs::write(Self::PATH, bincode::serialize(&height).unwrap()).unwrap();
+        height
     }
 }
 
 #[derive(Debug, Clone)]
 enum Command {
-    /// Get the height of the last commit.
-    GetInfo { result_tx: Sender<(i64, Vec<u8>)> },
     /// Send a transaction for SnarkVM verification, e.g. to check an execution proof.
     VerifyTransaction {
         transaction: Transaction,
@@ -394,9 +391,6 @@ enum Command {
         transaction: Transaction,
         result_tx: Sender<Result<()>>,
     },
-    /// Commit the current state of the application, which involves recomputing
-    /// the application's hash.
-    Commit { result_tx: Sender<(i64, Vec<u8>)> },
 }
 
 fn channel_send<T>(tx: &Sender<T>, value: T) -> Result<()> {
