@@ -195,7 +195,7 @@ fn token_transaction() {
             &program_path,
             "mint",
             "10u64",
-            alice_credentials.get("address").unwrap(),
+            "%account",
         ])
         .assert()
         .success();

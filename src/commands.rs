@@ -85,12 +85,17 @@ pub fn parse_input_value(input: &str) -> Result<Value> {
         return Ok(Value::Record(record));
     }
 
-    // try parsing a jsonified plaintext record
-    let result = serde_json::from_str::<Record>(input);
-    if let Ok(record) = result {
-        return Ok(Value::Record(record));
+    // %account is a syntactic sugar for cuerren user address
+    if input == "%account" {
+        let credentials = account::Credentials::load()?;
+        let address = credentials.address.to_string();
+        return Value::from_str(&address);
     }
 
+    // try parsing a jsonified plaintext record
+    if let Ok(record) = serde_json::from_str::<Record>(input) {
+        return Ok(Value::Record(record));
+    }
     // otherwise fallback to parsing a snarkvm literal
     Value::from_str(input)
 }
