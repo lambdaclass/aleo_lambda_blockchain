@@ -20,6 +20,7 @@ jobs:
       - run: |
           make node > /dev/null &
           make abci > /dev/null &
+          sleep 5 &&
           cargo test --release
   clippy:
     runs-on: [self-hosted, nomad]

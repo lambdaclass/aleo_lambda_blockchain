@@ -99,6 +99,15 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
             transition.function_name()
         );
 
+        // Ensure an external execution isn't attempting to create credits
+        // The assumption at this point is that credits can only be created in the genesis block
+        // We may revisit if we add validator rewards, at which point some credits may be minted, although
+        // still not by external function calls
+        ensure!(
+            !Program::is_coinbase(transition.program_id(), transition.function_name()),
+            "Coinbase functions cannot be called"
+        );
+
         // Ensure the transition ID is correct.
         ensure!(
             **transition.id() == transition.to_root()?,
@@ -258,8 +267,17 @@ pub fn generate_execution(
         "Function '{function_name}' does not exist."
     );
 
+    // we check this on the verify side (which will run in the blockchain)
+    // repeating here just to fail early
+    ensure!(
+        !Program::is_coinbase(program_id, &function_name),
+        "Coinbase functions cannot be called"
+    );
+
     let mut process = Process::load()?;
-    process.add_program(&program).unwrap();
+    if program_id.to_string() != "credits.aleo" {
+        process.add_program(&program).unwrap();
+    }
 
     let universal_srs = Arc::new(UniversalSRS::load()?);
 

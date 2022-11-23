@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use lib::{
     transaction::Transaction,
     vm::{self, Process},
+    GenesisState,
 };
 use snarkvm::prelude::Itertools;
 use std::{
@@ -10,8 +11,9 @@ use std::{
 };
 use tendermint_abci::Application;
 use tendermint_proto::abci::{
-    Event, EventAttribute, RequestCheckTx, RequestDeliverTx, RequestInfo, RequestQuery,
-    ResponseCheckTx, ResponseCommit, ResponseDeliverTx, ResponseInfo, ResponseQuery,
+    Event, EventAttribute, RequestCheckTx, RequestDeliverTx, RequestInfo, RequestInitChain,
+    RequestQuery, ResponseCheckTx, ResponseCommit, ResponseDeliverTx, ResponseInfo,
+    ResponseInitChain, ResponseQuery,
 };
 use tracing::{debug, error, info};
 
@@ -29,6 +31,21 @@ pub struct SnarkVMApp {
 }
 
 impl Application for SnarkVMApp {
+    /// This hook is called once upon genesis. It's used to load a default set of records which
+    /// make the initial distribution of credits in the system.
+    fn init_chain(&self, request: RequestInitChain) -> ResponseInitChain {
+        info!("Loading genesis");
+        let state: GenesisState =
+            serde_json::from_slice(&request.app_state_bytes).expect("invalid genesis state");
+        for (commitment, record) in state.records {
+            debug!("Storing genesis record {}", commitment);
+            self.records
+                .add(commitment, record)
+                .expect("failure adding genesis records");
+        }
+        Default::default()
+    }
+
     /// This hook provides information about the ABCI application.
     fn info(&self, request: RequestInfo) -> ResponseInfo {
         debug!(

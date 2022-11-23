@@ -356,6 +356,85 @@ fn consume_records() {
         .failure();
 }
 
+#[test]
+fn validate_credits() {
+    let (_tempfile, home_path) = &new_account();
+
+    let credits_path = "aleo/credits.aleo";
+
+    // test that executing the mint function fails
+    let result = Command::cargo_bin("client")
+        .unwrap()
+        .env("ALEO_HOME", home_path)
+        .args([
+            "program",
+            "execute",
+            credits_path,
+            "mint",
+            "%account",
+            "100u64",
+        ])
+        .assert()
+        .failure();
+
+    let error: HashMap<String, String> = parse_output(result);
+    assert_eq!("Coinbase functions cannot be called", error["error"]);
+
+    // test that executing the genesis function fails
+    let result = Command::cargo_bin("client")
+        .unwrap()
+        .env("ALEO_HOME", home_path)
+        .args([
+            "program",
+            "execute",
+            credits_path,
+            "genesis",
+            "%account",
+            "100u64",
+        ])
+        .assert()
+        .failure();
+    let error: HashMap<String, String> = parse_output(result);
+    assert_eq!("Coinbase functions cannot be called", error["error"]);
+
+    // test that executing a custom program that tries to create gates fails
+    let (_program_file, program_path) = load_program("credits");
+    Command::cargo_bin("client")
+        .unwrap()
+        .env("ALEO_HOME", home_path)
+        .args(["program", "deploy", &program_path])
+        .assert()
+        .success();
+
+    let result = Command::cargo_bin("client")
+        .unwrap()
+        .env("ALEO_HOME", home_path)
+        .args([
+            "program",
+            "execute",
+            &program_path,
+            "mint",
+            "%account",
+            "100u64",
+        ])
+        .assert()
+        .failure();
+    let error: HashMap<String, String> = parse_output(result);
+    assert!(error["error"].contains("is not satisfied on the given inputs"));
+}
+
+#[test]
+fn transfer_credits() {
+    // TODO implement this when the get records feature is implemented
+    // (so we know what local account records are available for transfer)
+
+    // (this assumes the blockchain is running with minted tokens for the local account)
+    // create a test account
+    // using the local environment ALEO_HOME, execute credits transfer to the test account
+    // check output record with ALEO_HOME account, verify it has moved credits out
+    // check output record with test account, verify it has received credits
+}
+
 // HELPERS
 
 /// Retries iteratively to get a transaction until something returns

@@ -9,3 +9,8 @@ pub struct GetDecryptionResponse {
     pub execution: transaction::Transaction,
     pub decrypted_records: Vec<vm::Record>,
 }
+
+#[derive(Deserialize, Serialize)]
+pub struct GenesisState {
+    pub records: Vec<(vm::Field, vm::EncryptedRecord)>,
+}

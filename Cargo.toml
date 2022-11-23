@@ -20,6 +20,11 @@ path = "src/client.rs"
 test = false
 
 [[bin]]
+name = "genesis"
+path = "src/genesis.rs"
+test = false
+
+[[bin]]
 name = "snarkvm_abci"
 path = "src/snarkvm_abci/main.rs"
 

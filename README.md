@@ -10,7 +10,7 @@ MVP for an aleo blockchain. The current implementation uses a thin wrapper aroun
 
 ## Running a single-node blockchain
 
-Requires Rust to be installed.
+Requires Rust and `jq` to be installed.
 
 Run `snarkvm_abci`:
 
