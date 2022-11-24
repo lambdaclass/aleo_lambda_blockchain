@@ -4,12 +4,13 @@ use std::{str::FromStr, sync::Arc};
 
 use anyhow::{bail, ensure, Result};
 use log::debug;
+use parking_lot::{lock_api::RwLock, RawRwLock};
 use rand::rngs::ThreadRng;
 use snarkvm::{
-    circuit::AleoV0,
+    circuit::{AleoV0, IndexMap},
     prelude::{
-        Environment, FinalizeTypes, FromBytes, Instruction, Network, RegisterTypes, Testnet3,
-        ToBytes, ToField, I64,
+        CallStack, Environment, FinalizeTypes, FromBytes, Instruction, Network, RegisterTypes,
+        Testnet3, ToBytes, ToField, I64,
     },
 };
 
@@ -33,30 +34,34 @@ pub type Field = snarkvm::prelude::Field<Testnet3>;
 pub type Origin = snarkvm::prelude::Origin<Testnet3>;
 pub type Output = snarkvm::prelude::Output<Testnet3>;
 pub type ProgramID = snarkvm::prelude::ProgramID<Testnet3>;
+pub type Certificate = snarkvm::prelude::Certificate<Testnet3>;
+pub type VerifyingKey = snarkvm::prelude::VerifyingKey<Testnet3>;
 
-// TODO: keeping Process here as a parameter mainly for the ABCI to use, but it has to be removed
-// in favor of a more general program store
-pub fn verify_deployment(
-    deployment: &Deployment,
-    process: &Process,
-    rng: &mut ThreadRng,
-) -> Result<()> {
-    // Retrieve the program ID.
-    let program_id = deployment.program().id();
-    // Ensure the program does not already exist in the process.
-    ensure!(
-        !process.contains_program(program_id),
-        "Program '{program_id}' already exists"
-    );
+pub type VerifyingKeyMap = IndexMap<Identifier, (VerifyingKey, Certificate)>;
+
+pub fn verify_deployment(deployment: &Deployment, rng: &mut ThreadRng) -> Result<()> {
     // Ensure the program is well-formed, by computing the stack.
-    let stack = Stack::new(process, deployment.program())?;
+    let universal_srs = Arc::new(UniversalSRS::load()?);
+    let stack = new_init_stack(deployment.program(), universal_srs)?;
+
     // Ensure the verifying keys are well-formed and the certificates are valid.
     stack.verify_deployment::<AleoV0, _>(deployment, rng)
 }
 
-// TODO: keeping Process here as a parameter mainly for the ABCI to use, but it has to be removed
-// in favor of a more general program store
-pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> {
+// TODO review universal_srs usage
+pub fn verify_execution(
+    execution: &Execution,
+    program: &Program,
+    verifying_keys: &IndexMap<Identifier, (VerifyingKey, Certificate)>,
+) -> Result<()> {
+    let universal_srs = Arc::new(UniversalSRS::load()?);
+
+    let stack = new_init_stack(program, universal_srs)?;
+
+    for (function_name, (verifying_key, _)) in verifying_keys {
+        stack.insert_verifying_key(function_name, verifying_key.clone())?;
+    }
+
     // Retrieve the edition.
     let edition = execution.edition();
     // Ensure the edition matches.
@@ -65,7 +70,6 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
         "Executed the wrong edition (expected '{}', found '{edition}').",
         Testnet3::EDITION
     );
-
     // Ensure the execution contains transitions.
     ensure!(
         !execution.is_empty(),
@@ -76,8 +80,6 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
     {
         // Retrieve the transition (without popping it).
         let transition = execution.peek()?;
-        // Retrieve the stack.
-        let stack = process.get_stack(transition.program_id())?;
         // Ensure the number of calls matches the number of transitions.
         let number_of_calls = stack.get_number_of_calls(transition.function_name())?;
         ensure!(
@@ -89,7 +91,6 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
 
     // Replicate the execution stack for verification.
     let mut queue = execution.clone();
-
     // Verify each transition.
     while let Ok(transition) = queue.pop() {
         #[cfg(debug_assertions)]
@@ -98,7 +99,6 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
             transition.program_id(),
             transition.function_name()
         );
-
         // Ensure an external execution isn't attempting to create credits
         // The assumption at this point is that credits can only be created in the genesis block
         // We may revisit if we add validator rewards, at which point some credits may be minted, although
@@ -107,7 +107,6 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
             !Program::is_coinbase(transition.program_id(), transition.function_name()),
             "Coinbase functions cannot be called"
         );
-
         // Ensure the transition ID is correct.
         ensure!(
             **transition.id() == transition.to_root()?,
@@ -123,7 +122,6 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
             transition.outputs().len() <= Testnet3::MAX_INPUTS,
             "Transition exceeded maximum number of outputs"
         );
-
         // Ensure each input is valid.
         if transition
             .inputs()
@@ -143,10 +141,8 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
         {
             bail!("Failed to verify a transition output")
         }
-
         // Compute the x- and y-coordinate of `tpk`.
         let (tpk_x, tpk_y) = transition.tpk().to_xy_coordinate();
-
         // [Inputs] Construct the verifier inputs to verify the proof.
         let mut inputs = vec![
             <Testnet3 as Environment>::Field::one(),
@@ -162,8 +158,6 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
                 .flat_map(|input| input.verifier_inputs()),
         );
 
-        // Retrieve the stack.
-        let stack = process.get_stack(transition.program_id())?;
         // Retrieve the function from the stack.
         let function = stack.get_function(transition.function_name())?;
         // Determine the number of function calls in this function.
@@ -171,7 +165,7 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
         for instruction in function.instructions() {
             if let Instruction::Call(call) = instruction {
                 // Determine if this is a function call.
-                if call.is_function_call(stack)? {
+                if call.is_function_call(&stack)? {
                     num_function_calls += 1;
                 }
             }
@@ -200,10 +194,8 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
                 .iter()
                 .flat_map(|output| output.verifier_inputs()),
         );
-
         // [Inputs] Extend the verifier inputs with the fee.
         inputs.push(*I64::<Testnet3>::new(*transition.fee()).to_field()?);
-
         #[cfg(debug_assertions)]
         debug!(
             "Transition public inputs ({} elements): {:#?}",
@@ -212,29 +204,13 @@ pub fn verify_execution(execution: &Execution, process: &Process) -> Result<()> 
         );
 
         // Retrieve the verifying key.
-        let verifying_key =
-            process.get_verifying_key(transition.program_id(), transition.function_name())?;
+        let verifying_key = stack.get_verifying_key(transition.function_name())?;
         // Ensure the proof is valid.
         ensure!(
             verifying_key.verify(transition.function_name(), &inputs, transition.proof()),
             "Transition is invalid"
         );
     }
-    Ok(())
-}
-
-// TODO: keeping Process here as a parameter mainly for the ABCI to use, but it has to be removed
-// in favor of a more general program store
-pub fn finalize_deployment(deployment: &Deployment, process: &mut Process) -> Result<()> {
-    // Compute the program stack.
-    let stack = Stack::new(process, deployment.program())?;
-    // Insert the verifying keys.
-    for (function_name, (verifying_key, _)) in deployment.verifying_keys() {
-        stack.insert_verifying_key(function_name, verifying_key.clone())?;
-    }
-
-    // Add the stack to the process.
-    process.stacks.insert(*deployment.program_id(), stack);
     Ok(())
 }
 
@@ -280,8 +256,6 @@ pub fn generate_execution(
     }
 
     let universal_srs = Arc::new(UniversalSRS::load()?);
-
-    // Compute the program stack.
     let stack = new_init_stack(&program, universal_srs)?;
 
     // Synthesize each proving and verifying key.
@@ -295,11 +269,26 @@ pub fn generate_execution(
     );
 
     // Execute the circuit.
-    let authorization =
-        process.authorize::<AleoV0, _>(private_key, program_id, function_name, inputs, rng)?;
-    let (response, execution) = process.execute::<AleoV0, _>(authorization, rng)?;
+    let authorization = stack.authorize::<AleoV0, _>(private_key, function_name, inputs, rng)?;
 
-    debug!("outputs {:?}", response.outputs());
+    let request = authorization.peek_next()?;
+
+    // Initialize the execution.
+    let execution: Arc<RwLock<RawRwLock, _>> = Arc::new(RwLock::new(Execution::new()));
+    // Execute the circuit.
+    let _ = stack.execute_function::<AleoV0, _>(
+        CallStack::execute(authorization, execution.clone())?,
+        rng,
+    )?;
+    // Extract the execution.
+    let execution = execution.read().clone();
+    // Ensure the execution is not empty.
+    ensure!(
+        !execution.is_empty(),
+        "Execution of '{}/{}' is empty",
+        request.program_id(),
+        request.function_name()
+    );
 
     Ok(execution)
 }
@@ -338,7 +327,6 @@ fn new_init_stack(program: &Program, universal_srs: Arc<UniversalSRS>) -> Result
         "Program string serialization failed"
     );
 
-    // Return the stack.
     // Construct the stack for the program.
     let mut stack = Stack {
         program: program.clone(),

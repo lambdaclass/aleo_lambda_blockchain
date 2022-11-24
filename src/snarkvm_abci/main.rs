@@ -6,6 +6,7 @@ use tendermint_abci::ServerBuilder;
 use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt};
 
 mod application;
+mod program_store;
 mod record_store;
 
 #[derive(Debug, Parser)]
@@ -56,11 +57,10 @@ fn main() {
 
     subscriber.init();
 
-    let (app, driver) = SnarkVMApp::new();
+    let app = SnarkVMApp::new();
     let server = ServerBuilder::new(cli.read_buf_size)
         .bind(format!("{}:{}", cli.host, cli.port), app)
         .unwrap();
 
-    std::thread::spawn(move || driver.run());
     server.listen().unwrap();
 }

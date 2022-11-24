@@ -48,12 +48,14 @@ tokio = { version = "1.15.0", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["env-filter", "fmt", "std"]}
 uuid = { version = "1.2.1", features = ["v4"] }
+parking_lot = { version = "0.12.1" }
 dirs = "4.0.0"
 rocksdb = "0.19.0"
 
 [dependencies.snarkvm]
 git = "https://github.com/Entropy1729/snarkVM.git"
 branch = "testnet3"
+#path = "../entropy/snarkVM"
 features = ["circuit", "console", "parallel"]
 
 [dev-dependencies]

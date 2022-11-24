@@ -26,7 +26,7 @@ pub struct Cli {
     command: Command,
 
     /// Output log lines to stdout based on the desired log level (RUST_LOG env var).
-    #[clap(short, long, global = false)]
+    #[clap(short, long, global = false, default_value_t = false)]
     verbose: bool,
 
     /// tendermint node url

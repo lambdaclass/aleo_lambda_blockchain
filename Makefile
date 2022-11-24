@@ -31,8 +31,8 @@ genesis: bin/tendermint cli
 # Run a tendermint node, installing it if necessary
 # Note: manually setting the max_body_bytes config here. if we need to update other values find a more visible/sustainable way.
 node: genesis
-	sed -i.bak 's/max_body_bytes = 1000000/max_body_bytes = 10000000/g' ~/.tendermint/config/config.toml
-	sed -i.bak 's/max_tx_bytes = 1048576/max_tx_bytes = 10485760/g' ~/.tendermint/config/config.toml
+	sed -i.bak 's/max_body_bytes = 1000000/max_body_bytes = 12000000/g' ~/.tendermint/config/config.toml
+	sed -i.bak 's/max_tx_bytes = 1048576/max_tx_bytes = 10485770/g' ~/.tendermint/config/config.toml
 	bin/tendermint node --consensus.create_empty_blocks_interval="8s"
 
 # remove the blockchain data
