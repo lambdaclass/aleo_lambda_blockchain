@@ -21,9 +21,7 @@ pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Value = snarkvm::prelude::Value<Testnet3>;
 pub type Program = snarkvm::prelude::Program<Testnet3>;
 pub type Ciphertext = snarkvm::prelude::Ciphertext<Testnet3>;
-pub type Process = snarkvm::prelude::Process<Testnet3>;
 pub type Execution = snarkvm::prelude::Execution<Testnet3>;
-pub type UniversalSRS = snarkvm::prelude::UniversalSRS<Testnet3>;
 pub type Record = snarkvm::prelude::Record<Testnet3, snarkvm::prelude::Plaintext<Testnet3>>;
 pub type EncryptedRecord = snarkvm::prelude::Record<Testnet3, Ciphertext>;
 pub type ViewKey = snarkvm::prelude::ViewKey<Testnet3>;
@@ -37,16 +35,12 @@ pub type VerifyingKey = snarkvm::prelude::VerifyingKey<Testnet3>;
 
 pub type VerifyingKeyMap = IndexMap<Identifier, (VerifyingKey, Certificate)>;
 
+/// Ensure the verifying keys are well-formed and the certificates are valid.
 pub fn verify_deployment(deployment: &Deployment, rng: &mut ThreadRng) -> Result<()> {
-    // Ensure the program is well-formed, by computing the stack.
-    let universal_srs = Arc::new(UniversalSRS::load()?);
-    let stack = stack::new_init(deployment.program(), universal_srs)?;
-
-    // Ensure the verifying keys are well-formed and the certificates are valid.
+    let stack = stack::new_init(deployment.program())?;
     stack.verify_deployment::<AleoV0, _>(deployment, rng)
 }
 
-// TODO review universal_srs usage
 pub fn verify_execution(
     execution: &Execution,
     program: &Program,
@@ -81,8 +75,7 @@ pub fn verify_execution(
     let mut queue = execution.clone();
     // Verify each transition.
     while let Ok(transition) = queue.pop() {
-        #[cfg(debug_assertions)]
-        println!(
+        debug!(
             "Verifying transition for {}/{}...",
             transition.program_id(),
             transition.function_name()
@@ -176,7 +169,6 @@ pub fn verify_execution(
         );
         // [Inputs] Extend the verifier inputs with the fee.
         inputs.push(*I64::<Testnet3>::new(*transition.fee()).to_field()?);
-        #[cfg(debug_assertions)]
         debug!(
             "Transition public inputs ({} elements): {:#?}",
             inputs.len(),
@@ -200,12 +192,7 @@ pub fn verify_execution(
 pub fn generate_deployment(program_string: &str, rng: &mut ThreadRng) -> Result<Deployment> {
     let program = snarkvm::prelude::Program::from_str(program_string).unwrap();
 
-    let universal_srs = Arc::new(UniversalSRS::load()?);
-
-    // NOTE: we're skipping the part of imported programs
-    // https://github.com/Entropy1729/snarkVM/blob/2c4e282df46ed71c809fd4b49738fd78562354ac/vm/package/deploy.rs#L149
-
-    let stack = stack::new_init(&program, universal_srs)?;
+    let stack = stack::new_init(&program)?;
     // Return the deployment.
     stack.deploy::<AleoV0, _>(rng)
 }
@@ -232,13 +219,7 @@ pub fn generate_execution(
         "Coinbase functions cannot be called"
     );
 
-    let mut process = Process::load()?;
-    if program_id.to_string() != "credits.aleo" {
-        process.add_program(&program).unwrap();
-    }
-
-    let universal_srs = Arc::new(UniversalSRS::load()?);
-    let stack = stack::new_init(&program, universal_srs)?;
+    let stack = stack::new_init(&program)?;
 
     // Synthesize each proving and verifying key.
     for function_name in program.functions().keys() {
@@ -250,27 +231,14 @@ pub fn generate_execution(
         program, function_name, inputs
     );
 
-    // Execute the circuit.
     let authorization = stack.authorize::<AleoV0, _>(private_key, function_name, inputs, rng)?;
 
-    let request = authorization.peek_next()?;
-
-    // Initialize the execution.
     let execution: Arc<RwLock<RawRwLock, _>> = Arc::new(RwLock::new(Execution::new()));
     // Execute the circuit.
     let _ = stack.execute_function::<AleoV0, _>(
         CallStack::execute(authorization, execution.clone())?,
         rng,
     )?;
-    // Extract the execution.
     let execution = execution.read().clone();
-    // Ensure the execution is not empty.
-    ensure!(
-        !execution.is_empty(),
-        "Execution of '{}/{}' is empty",
-        request.program_id(),
-        request.function_name()
-    );
-
     Ok(execution)
 }

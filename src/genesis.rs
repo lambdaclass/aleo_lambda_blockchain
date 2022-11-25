@@ -6,16 +6,20 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use lib::{
-    vm::{EncryptedRecord, Field, Identifier, Process, ProgramID, Value},
+    vm::{EncryptedRecord, Field, Identifier, ProgramID, Value},
     GenesisState,
 };
-use snarkvm::circuit::AleoV0;
+use snarkvm::{
+    circuit::AleoV0,
+    prelude::{Process, Testnet3},
+};
 
 fn main() -> Result<()> {
     let mut rng = rand::thread_rng();
     let credentials = account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
 
-    let process = Process::load()?;
+    // FIXME remove reliance on process
+    let process = Process::<Testnet3>::load()?;
     let program_id = ProgramID::from_str("credits.aleo").unwrap();
     let function_name = Identifier::from_str("genesis").unwrap();
     let address = Value::from_str(&credentials.address.to_string()).unwrap();

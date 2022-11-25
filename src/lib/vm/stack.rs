@@ -1,45 +1,26 @@
 /// This module includes helper functions initially taken from SnarkVM's Stack struct.
 /// The goal is to progressively remove the dependency on that struct.
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
-use super::{Identifier, Program, UniversalSRS};
+use super::{Identifier, Program};
 use anyhow::{bail, ensure, Result};
-use snarkvm::prelude::{CallOperator, FromBytes, Instruction, RegisterTypes, Testnet3, ToBytes};
+use snarkvm::prelude::{CallOperator, Instruction, RegisterTypes, Testnet3, UniversalSRS};
 
 pub type Stack = snarkvm::prelude::Stack<Testnet3>;
 
 /// This function creates and initializes a `Stack` struct for a given program on the fly, providing functionality
 /// related to Programs (deploy, executions, key synthesis) without the need of a `Process`. It essentially combines
 /// Stack::new() and Stack::init()
-pub fn new_init(program: &Program, universal_srs: Arc<UniversalSRS>) -> Result<Stack> {
+pub fn new_init(program: &Program) -> Result<Stack> {
+    let universal_srs = Arc::new(UniversalSRS::<Testnet3>::load()?);
+
     // Retrieve the program ID.
     let program_id = program.id();
-    // Ensure the program network-level domain (NLD) is correct.
-    ensure!(
-        program_id.is_aleo(),
-        "Program '{program_id}' has an incorrect network-level domain (NLD)"
-    );
 
     // Ensure the program contains functions.
     ensure!(
         !program.functions().is_empty(),
         "No functions present in the deployment for program '{program_id}'"
-    );
-
-    // Serialize the program into bytes.
-    let program_bytes = program.to_bytes_le()?;
-    // Ensure the program deserializes from bytes correctly.
-    ensure!(
-        program == &Program::from_bytes_le(&program_bytes)?,
-        "Program byte serialization failed"
-    );
-
-    // Serialize the program into string.
-    let program_string = program.to_string();
-    // Ensure the program deserializes from a string correctly.
-    ensure!(
-        program == &Program::from_str(&program_string)?,
-        "Program string serialization failed"
     );
 
     // Construct the stack for the program.
@@ -53,37 +34,6 @@ pub fn new_init(program: &Program, universal_srs: Arc<UniversalSRS>) -> Result<S
         verifying_keys: Default::default(),
     };
 
-    // TODO: Handle imports (see comment in generate_deployment())
-
-    // Add the program closures to the stack.
-    for closure in program.closures().values() {
-        // Add the closure to the stack.
-        // Retrieve the closure name.
-        let name = closure.name();
-        // Ensure the closure name is not already added.
-        ensure!(
-            stack.get_register_types(name).is_err(),
-            "Closure '{name}' already exists"
-        );
-
-        // Compute the register types.
-        let register_types = RegisterTypes::from_closure(&stack, closure)?;
-        // Add the closure name and register types to the stack.
-        stack.register_types.insert(*name, register_types);
-        // Return success.
-        // Retrieve the closure name.
-        let name = closure.name();
-        // Ensure the closure name is not already added.
-        ensure!(
-            !stack.register_types.contains_key(name),
-            "Closure '{name}' already exists"
-        );
-
-        // Compute the register types.
-        let register_types = RegisterTypes::from_closure(&stack, closure)?;
-        // Add the closure name and register types to the stack.
-        stack.register_types.insert(*name, register_types);
-    }
     // Add the program functions to the stack.
     for function in program.functions().values() {
         let name = function.name();
