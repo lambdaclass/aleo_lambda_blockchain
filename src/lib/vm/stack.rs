@@ -2,9 +2,9 @@
 /// The goal is to progressively remove the dependency on that struct.
 use std::sync::Arc;
 
-use super::{Identifier, Program};
-use anyhow::{bail, ensure, Result};
-use snarkvm::prelude::{CallOperator, Instruction, RegisterTypes, Testnet3, UniversalSRS};
+use super::Program;
+use anyhow::{ensure, Result};
+use snarkvm::prelude::{RegisterTypes, Testnet3, UniversalSRS};
 
 pub type Stack = snarkvm::prelude::Stack<Testnet3>;
 
@@ -50,23 +50,4 @@ pub fn new_init(program: &Program) -> Result<Stack> {
     }
     // Return the stack.
     Ok(stack)
-}
-
-/// Determine the number of function calls in this function (including the function itself).
-/// NOTE: we are not considering external function calls (from an imported program) here.
-pub fn count_function_calls(program: &Program, function_name: &Identifier) -> Result<usize> {
-    let mut num_function_calls = 1;
-    let function = program.get_function(function_name)?;
-    for instruction in function.instructions() {
-        if let Instruction::Call(call) = instruction {
-            num_function_calls += match call.operator() {
-                CallOperator::Locator(_locator) => {
-                    bail!("external function calls are not supported")
-                }
-                CallOperator::Resource(resource) => count_function_calls(program, resource)?,
-            };
-        }
-    }
-
-    Ok(num_function_calls)
 }

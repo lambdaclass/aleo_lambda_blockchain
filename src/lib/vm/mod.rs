@@ -32,6 +32,7 @@ pub type Output = snarkvm::prelude::Output<Testnet3>;
 pub type ProgramID = snarkvm::prelude::ProgramID<Testnet3>;
 pub type Certificate = snarkvm::prelude::Certificate<Testnet3>;
 pub type VerifyingKey = snarkvm::prelude::VerifyingKey<Testnet3>;
+pub type Transition = snarkvm::prelude::Transition<Testnet3>;
 
 pub type VerifyingKeyMap = IndexMap<Identifier, (VerifyingKey, Certificate)>;
 
@@ -42,39 +43,17 @@ pub fn verify_deployment(deployment: &Deployment, rng: &mut ThreadRng) -> Result
 }
 
 pub fn verify_execution(
-    execution: &Execution,
-    program: &Program,
+    transitions: &Vec<Transition>,
     verifying_keys: &IndexMap<Identifier, (VerifyingKey, Certificate)>,
 ) -> Result<()> {
-    // Retrieve the edition.
-    let edition = execution.edition();
-    // Ensure the edition matches.
+    // Ensure the number of transitions matches the program function.
     ensure!(
-        edition == Testnet3::EDITION,
-        "Executed the wrong edition (expected '{}', found '{edition}').",
-        Testnet3::EDITION
-    );
-    // Ensure the execution contains transitions.
-    ensure!(
-        !execution.is_empty(),
+        !transitions.is_empty(),
         "There are no transitions in the execution"
     );
 
-    // Ensure the number of transitions matches the program function.
-    let transition = execution.peek()?;
-
-    // Ensure the number of calls matches the number of transitions.
-    let number_of_calls = stack::count_function_calls(program, transition.function_name())?;
-    ensure!(
-        number_of_calls == execution.len(),
-        "The number of transitions in the execution is incorrect. Expected {number_of_calls}, but found {}",
-        execution.len()
-    );
-
-    // Replicate the execution stack for verification.
-    let mut queue = execution.clone();
     // Verify each transition.
-    while let Ok(transition) = queue.pop() {
+    for transition in transitions {
         debug!(
             "Verifying transition for {}/{}...",
             transition.program_id(),
@@ -138,27 +117,6 @@ pub fn verify_execution(
                 .iter()
                 .flat_map(|input| input.verifier_inputs()),
         );
-
-        // count internal function calls (excluding the own function call)
-        let extra_function_calls =
-            stack::count_function_calls(program, transition.function_name())? - 1;
-
-        // If there are function calls, append their inputs and outputs.
-        if extra_function_calls > 0 {
-            // This loop takes the last `num_function_call` transitions, and reverses them
-            // to order them in the order they were defined in the function.
-            for transition in (*queue).iter().rev().take(extra_function_calls).rev() {
-                // [Inputs] Extend the verifier inputs with the input IDs of the external call.
-                inputs.extend(
-                    transition
-                        .inputs()
-                        .iter()
-                        .flat_map(|input| input.verifier_inputs()),
-                );
-                // [Inputs] Extend the verifier inputs with the output IDs of the external call.
-                inputs.extend(transition.output_ids().map(|id| **id));
-            }
-        }
 
         // [Inputs] Extend the verifier inputs with the output IDs.
         inputs.extend(

@@ -10,7 +10,7 @@ pub enum Transaction {
     },
     Execution {
         id: String,
-        execution: vm::Execution,
+        transitions: Vec<vm::Transition>,
     },
 }
 
@@ -23,8 +23,8 @@ impl Transaction {
     }
 
     pub fn output_records(&self) -> Vec<&Record<Testnet3, Ciphertext<Testnet3>>> {
-        if let Transaction::Execution { execution, .. } = self {
-            execution
+        if let Transaction::Execution { transitions, .. } = self {
+            transitions
                 .iter()
                 .flat_map(|transition| transition.output_records())
                 .map(|(_, record)| record)
@@ -46,8 +46,11 @@ impl Transaction {
     /// If the transaction is an execution, return the list of input record origins
     /// (in case they are record commitments).
     pub fn origin_commitments(&self) -> Vec<&vm::Field> {
-        if let Transaction::Execution { ref execution, .. } = self {
-            execution
+        if let Transaction::Execution {
+            ref transitions, ..
+        } = self
+        {
+            transitions
                 .iter()
                 .flat_map(|transition| transition.origins())
                 .filter_map(|origin| {
@@ -70,8 +73,8 @@ impl std::fmt::Display for Transaction {
             Transaction::Deployment { id, deployment } => {
                 write!(f, "Deployment({},{})", id, deployment.program_id())
             }
-            Transaction::Execution { id, execution } => {
-                let transition = execution.peek().unwrap();
+            Transaction::Execution { id, transitions } => {
+                let transition = transitions.first().unwrap();
                 let program_id = transition.program_id();
                 write!(f, "Execution({},{})", program_id, id)
             }

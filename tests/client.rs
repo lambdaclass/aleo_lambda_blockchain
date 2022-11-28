@@ -39,7 +39,7 @@ fn basic_program() {
     // get execution tx, assert expected output
     let transaction = retry_command(home_path, &[GET, transaction_id]).unwrap();
     let value = transaction
-        .pointer("/Execution/execution/transitions/0/outputs/0/value")
+        .pointer("/Execution/transitions/0/outputs/0/value")
         .unwrap()
         .as_str()
         .unwrap();
@@ -402,7 +402,7 @@ fn get_decrypted_record(transaction: &serde_json::Value) -> (&str, &str, &str) {
 
 fn get_encrypted_record(transaction: &serde_json::Value) -> &str {
     transaction
-        .pointer("/Execution/execution/transitions/0/outputs/0/value")
+        .pointer("/Execution/transitions/0/outputs/0/value")
         .unwrap()
         .as_str()
         .unwrap()

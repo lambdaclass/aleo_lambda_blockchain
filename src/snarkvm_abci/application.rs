@@ -1,4 +1,4 @@
-use anyhow::{bail, ensure, Result};
+use anyhow::{anyhow, bail, ensure, Result};
 use lib::{
     transaction::Transaction,
     vm::{self},
@@ -244,8 +244,11 @@ impl SnarkVMApp {
 
     /// Add the tranasction output records as unspent in the record store.
     fn add_output_records(&self, transaction: &Transaction) -> Result<()> {
-        if let Transaction::Execution { ref execution, .. } = transaction {
-            execution
+        if let Transaction::Execution {
+            ref transitions, ..
+        } = transaction
+        {
+            transitions
                 .iter()
                 .flat_map(|transition| transition.output_records())
                 .map(|(commitment, record)| self.records.add(*commitment, record.clone()))
@@ -267,14 +270,19 @@ impl SnarkVMApp {
                 );
                 vm::verify_deployment(deployment, rng)
             }
-            Transaction::Execution { ref execution, .. } => {
-                let transition = execution.peek()?;
+            Transaction::Execution {
+                ref transitions, ..
+            } => {
+                let transition = transitions
+                    .first()
+                    .ok_or_else(|| anyhow!("missing transition"))?;
 
                 // TODO this assumes only one transition represents the program, is this correct?
                 let stored_keys = self.programs.get(transition.program_id())?;
                 // only verify if we have the program available
-                if let Some((program, keys)) = stored_keys {
-                    vm::verify_execution(execution, &program, &keys)
+                // TODO review if we really need to store the program
+                if let Some((_program, keys)) = stored_keys {
+                    vm::verify_execution(transitions, &keys)
                 } else {
                     bail!(format!(
                         "Program {} does not exist",
