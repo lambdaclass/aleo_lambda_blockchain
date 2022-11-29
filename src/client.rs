@@ -68,6 +68,14 @@ async fn run(command: Command, url: String) -> Result<String> {
             let path = account::Credentials::new()?.save()?;
             format!("Saved credentials to {}", path.to_string_lossy())
         }
+        Command::Credits(credits) => {
+            let credentials =
+                account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
+            let transaction =
+                generate_credits_execution(credits.identifier()?, credits.inputs(), &credentials)?;
+            broadcast_to_blockchain(&transaction, &url).await?;
+            transaction.json()
+        }
         Command::Program(Program::Deploy { path }) => {
             let transaction = generate_deployment(&path)?;
             broadcast_to_blockchain(&transaction, &url).await?;
@@ -173,6 +181,21 @@ fn generate_execution(
     let id = uuid::Uuid::new_v4().to_string();
     let transitions = execution.into_transitions().collect();
     Ok(Transaction::Execution { id, transitions })
+}
+
+fn generate_credits_execution(
+    function_name: vm::Identifier,
+    inputs: Vec<vm::Value>,
+    credentials: &account::Credentials,
+) -> Result<Transaction> {
+    let rng = &mut rand::thread_rng();
+
+    let execution = vm::credits_execution(function_name, &inputs, &credentials.private_key, rng)?;
+
+    // using uuid here too for consistency, although in the case of Transaction::from_execution the additional fee is optional
+    let id = uuid::Uuid::new_v4().to_string();
+
+    Ok(Transaction::Execution { id, execution })
 }
 
 async fn broadcast_to_blockchain(transaction: &Transaction, url: &str) -> Result<()> {

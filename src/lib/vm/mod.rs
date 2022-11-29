@@ -163,17 +163,34 @@ pub fn generate_execution(
     rng: &mut ThreadRng,
 ) -> Result<Execution> {
     let program: Program = snarkvm::prelude::Program::from_str(program_string).unwrap();
-    let program_id = program.id();
+    execute(program, function_name, inputs, private_key, rng)
+}
 
+pub fn credits_execution(
+    function_name: Identifier,
+    inputs: &[Value],
+    private_key: &PrivateKey,
+    rng: &mut ThreadRng,
+) -> Result<Execution> {
+    let credits_program = Program::credits()?;
+    execute(credits_program, function_name, inputs, private_key, rng)
+}
+
+fn execute(
+    program: Program,
+    function_name: Identifier,
+    inputs: &[Value],
+    private_key: &PrivateKey,
+    rng: &mut ThreadRng,
+) -> Result<Execution> {
     ensure!(
         program.contains_function(&function_name),
         "Function '{function_name}' does not exist."
     );
-
     // we check this on the verify side (which will run in the blockchain)
     // repeating here just to fail early
     ensure!(
-        !Program::is_coinbase(program_id, &function_name),
+        !Program::is_coinbase(program.id(), &function_name),
         "Coinbase functions cannot be called"
     );
 

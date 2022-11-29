@@ -1,33 +1,79 @@
 use crate::account;
 use anyhow::Result;
 use clap::Parser;
-use lib::vm::{Address, EncryptedRecord, Identifier, Record, Value};
+use lib::vm::{EncryptedRecord, Identifier, Record, Value};
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::vec;
 
 /// Commands to manage accounts.
 #[derive(Debug, Parser)]
 pub enum Account {
-    /// Generates a new account.
     New,
     /// Fetches the records owned by the given account.
     Records,
     /// Fetches the records owned by the given account and calculates the final credits balance.
     Balance,
-    /// Commits an execution transaction to send a determined amount of credits to another account.
-    Transfer {
-        /// Account to which the credits will be transferred.
-        #[clap(short, long)]
-        recipient_public_key: Address,
-        /// Amount of credits to transfer
-        #[clap(value_parser, short, long)]
-        credits: u64,
-    },
     Decrypt {
         /// Value to decrypt
         #[clap(short, long)]
         value: String,
     },
+}
+
+#[derive(Debug, Parser)]
+pub enum Credits {
+    /// Transfer credtis to recipient_address from address that owns the input record
+    Transfer {
+        #[clap(value_parser=parse_input_value)]
+        input_record: Value,
+        #[clap(value_parser=parse_input_value)]
+        recipient_address: Value,
+        #[clap(value_parser=parse_input_value)]
+        amount: Value,
+    },
+    /// Split input record by amount
+    Split {
+        #[clap(value_parser=parse_input_value)]
+        input_record: Value,
+        #[clap(value_parser=parse_input_value)]
+        amount: Value,
+    },
+    /// Combine two records into one
+    Combine {
+        #[clap(value_parser=parse_input_value)]
+        first_record: Value,
+        #[clap(value_parser=parse_input_value)]
+        second_record: Value,
+    },
+}
+
+impl Credits {
+    pub fn inputs(self) -> Vec<Value> {
+        match self {
+            Credits::Transfer {
+                input_record,
+                recipient_address,
+                amount,
+            } => vec![input_record, recipient_address, amount],
+            Credits::Combine {
+                first_record,
+                second_record,
+            } => vec![first_record, second_record],
+            Credits::Split {
+                input_record,
+                amount,
+            } => vec![input_record, amount],
+        }
+    }
+
+    pub fn identifier(&self) -> Result<Identifier> {
+        match self {
+            Credits::Combine { .. } => Identifier::try_from("combine"),
+            Credits::Split { .. } => Identifier::try_from("split"),
+            Credits::Transfer { .. } => Identifier::try_from("transfer"),
+        }
+    }
 }
 
 /// Commands to manage program transactions.
@@ -74,7 +120,10 @@ pub enum Command {
     Program(Program),
     #[clap(name = "get")]
     Get(Get),
+    #[clap(subcommand)]
+    Credits(Credits),
 }
+
 /// Extends the snarkvm's default argument parsing to support using record ciphertexts as record inputs
 pub fn parse_input_value(input: &str) -> Result<Value> {
     // try parsing an encrypted record string
