@@ -1,8 +1,9 @@
 use anyhow::{anyhow, Result};
 
-use lib::vm::{generate_deployment, Program, ProgramID, VerifyingKeyMap};
+use lib::vm::{self, Program, ProgramID, VerifyingKeyMap};
 use log::error;
 use rand::thread_rng;
+
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
 
@@ -37,11 +38,15 @@ impl ProgramStore {
             let mut rng = thread_rng();
 
             // Compute the 'credits.aleo' program stack.
-            let deployment = generate_deployment(program_str, &mut rng)?;
+            let deployment = vm::generate_deployment(program_str, &mut rng)?;
+            let credits_program_keys = (
+                deployment.program().clone(),
+                deployment.verifying_keys().clone(),
+            );
             db_programs
                 .put(
                     deployment.program_id().to_string().into_bytes(),
-                    deployment.to_string().into_bytes(),
+                    bincode::serialize(&credits_program_keys)?,
                 )
                 .unwrap_or_else(|e| error!("failed to write to db {}", e));
         }
@@ -136,7 +141,8 @@ impl ProgramStore {
 
 #[cfg(test)]
 mod tests {
-    use lib::vm::{self, Deployment, Program};
+    use lib::vm::{self, Program};
+    use snarkvm::prelude::Testnet3;
 
     use super::*;
     use std::{fs, str::FromStr};
@@ -191,7 +197,10 @@ mod tests {
         assert!(store.exists(program.id()));
     }
 
-    fn store_program(program_store: &ProgramStore, path: &str) -> Result<Deployment> {
+    fn store_program(
+        program_store: &ProgramStore,
+        path: &str,
+    ) -> Result<snarkvm::prelude::Deployment<Testnet3>> {
         let mut rng = thread_rng();
         let program_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
 

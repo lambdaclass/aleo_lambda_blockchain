@@ -2,11 +2,18 @@ use crate::vm::{self};
 use serde::{Deserialize, Serialize};
 use snarkvm::prelude::{Ciphertext, Record, Testnet3};
 
+// Until we settle on one of the alternatives depending on performance, we have 2 variants for deployment transactions:
+// Transaction::Deployment generates verifying keys offline and sends them to the network along with the program
+// Transaction::Source just sends the program after being validated, and keys are generated on-chain
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Transaction {
     Deployment {
         id: String,
         deployment: Box<vm::Deployment>,
+    },
+    Source {
+        id: String,
+        program: Box<vm::Program>,
     },
     Execution {
         id: String,
@@ -19,6 +26,7 @@ impl Transaction {
         match self {
             Transaction::Deployment { id, .. } => id,
             Transaction::Execution { id, .. } => id,
+            Transaction::Source { id, .. } => id,
         }
     }
 
@@ -72,6 +80,9 @@ impl std::fmt::Display for Transaction {
         match self {
             Transaction::Deployment { id, deployment } => {
                 write!(f, "Deployment({},{})", id, deployment.program_id())
+            }
+            Transaction::Source { id, program } => {
+                write!(f, "Source({},{})", id, program.id())
             }
             Transaction::Execution { id, transitions } => {
                 let transition = transitions.first().unwrap();

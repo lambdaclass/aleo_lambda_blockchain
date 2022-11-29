@@ -68,16 +68,16 @@ async fn run(command: Command, url: String) -> Result<String> {
             let path = account::Credentials::new()?.save()?;
             format!("Saved credentials to {}", path.to_string_lossy())
         }
-        Command::Credits(credits) => {
-            let credentials =
-                account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
-            let transaction =
-                generate_credits_execution(credits.identifier()?, credits.inputs(), &credentials)?;
-            broadcast_to_blockchain(&transaction, &url).await?;
-            transaction.json()
-        }
-        Command::Program(Program::Deploy { path }) => {
-            let transaction = generate_deployment(&path)?;
+        Command::Program(Program::Deploy {
+            path,
+            compile_remotely,
+        }) => {
+            let transaction = if compile_remotely {
+                generate_program(&path)?
+            } else {
+                generate_deployment(&path)?
+            };
+
             broadcast_to_blockchain(&transaction, &url).await?;
             transaction.json()
         }
@@ -90,6 +90,14 @@ async fn run(command: Command, url: String) -> Result<String> {
                 account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
 
             let transaction = generate_execution(&path, function, &inputs, &credentials)?;
+            broadcast_to_blockchain(&transaction, &url).await?;
+            transaction.json()
+        }
+        Command::Credits(credits) => {
+            let credentials =
+                account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
+            let transaction =
+                generate_credits_execution(credits.identifier()?, credits.inputs(), &credentials)?;
             broadcast_to_blockchain(&transaction, &url).await?;
             transaction.json()
         }
@@ -160,6 +168,19 @@ fn generate_deployment(path: &Path) -> Result<Transaction> {
     })
 }
 
+fn generate_program(path: &Path) -> Result<Transaction> {
+    let program_string = fs::read_to_string(path).unwrap();
+    debug!("Deploying non-compiled program {}", program_string);
+
+    let program = vm::generate_program(&program_string)?;
+
+    let id = uuid::Uuid::new_v4().to_string();
+    Ok(Transaction::Source {
+        id,
+        program: Box::new(program),
+    })
+}
+
 fn generate_execution(
     path: &Path,
     function_name: vm::Identifier,
@@ -190,11 +211,12 @@ fn generate_credits_execution(
     let rng = &mut rand::thread_rng();
 
     let execution = vm::credits_execution(function_name, &inputs, &credentials.private_key, rng)?;
+    let transitions = execution.into_transitions().collect();
 
     // using uuid here too for consistency, although in the case of Transaction::from_execution the additional fee is optional
     let id = uuid::Uuid::new_v4().to_string();
 
-    Ok(Transaction::Execution { id, execution })
+    Ok(Transaction::Execution { id, transitions })
 }
 
 async fn broadcast_to_blockchain(transaction: &Transaction, url: &str) -> Result<()> {

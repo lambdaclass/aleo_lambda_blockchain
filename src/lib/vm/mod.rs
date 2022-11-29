@@ -12,12 +12,10 @@ use snarkvm::{
 };
 
 use snarkvm::prelude::One;
-
 mod stack;
 
 pub type Address = snarkvm::prelude::Address<Testnet3>;
 pub type Identifier = snarkvm::prelude::Identifier<Testnet3>;
-pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Value = snarkvm::prelude::Value<Testnet3>;
 pub type Program = snarkvm::prelude::Program<Testnet3>;
 pub type Ciphertext = snarkvm::prelude::Ciphertext<Testnet3>;
@@ -32,13 +30,15 @@ pub type Output = snarkvm::prelude::Output<Testnet3>;
 pub type ProgramID = snarkvm::prelude::ProgramID<Testnet3>;
 pub type Certificate = snarkvm::prelude::Certificate<Testnet3>;
 pub type VerifyingKey = snarkvm::prelude::VerifyingKey<Testnet3>;
+pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Transition = snarkvm::prelude::Transition<Testnet3>;
 
 pub type VerifyingKeyMap = IndexMap<Identifier, (VerifyingKey, Certificate)>;
 
-/// Ensure the verifying keys are well-formed and the certificates are valid.
 pub fn verify_deployment(deployment: &Deployment, rng: &mut ThreadRng) -> Result<()> {
+    // Ensure the program is well-formed, by computing the stack.
     let stack = stack::new_init(deployment.program())?;
+
     stack.verify_deployment::<AleoV0, _>(deployment, rng)
 }
 
@@ -150,9 +150,18 @@ pub fn verify_execution(
 pub fn generate_deployment(program_string: &str, rng: &mut ThreadRng) -> Result<Deployment> {
     let program = snarkvm::prelude::Program::from_str(program_string).unwrap();
 
+    // NOTE: we're skipping the part of imported programs
+    // https://github.com/Entropy1729/snarkVM/blob/2c4e282df46ed71c809fd4b49738fd78562354ac/vm/package/deploy.rs#L149
+
     let stack = stack::new_init(&program)?;
     // Return the deployment.
     stack.deploy::<AleoV0, _>(rng)
+}
+
+// Generates a program deployment for source transactions
+pub fn generate_program(program_string: &str) -> Result<snarkvm::prelude::Program<Testnet3>> {
+    // Verify program is valid by parsing it and returning it
+    Program::from_str(program_string)
 }
 
 pub fn generate_execution(

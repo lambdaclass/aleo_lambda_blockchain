@@ -84,6 +84,9 @@ pub enum Program {
         /// Path where the aleo program file resides.
         #[clap(value_parser)]
         path: PathBuf,
+        /// Compile remotely and send the synthesized keys along with the program.
+        #[clap(short, long, default_value_t = false)]
+        compile_remotely: bool,
     },
     /// Runs locally and sends an execution transaction to the Blockchain, returning the Transaction ID
     Execute {

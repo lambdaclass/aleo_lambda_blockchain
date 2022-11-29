@@ -95,7 +95,7 @@ impl Application for SnarkVMApp {
         let result = self
             .check_no_duplicate_records(&tx)
             .and_then(|_| self.check_inputs_are_unspent(&tx))
-            .and_then(|_| self.verify_transaction(tx.clone()));
+            .and_then(|_| self.validate_transaction(&tx));
 
         if let Err(err) = result {
             ResponseCheckTx {
@@ -127,10 +127,10 @@ impl Application for SnarkVMApp {
         let result = self
             .check_no_duplicate_records(&tx)
             .and_then(|_| self.check_inputs_are_unspent(&tx))
-            .and_then(|_| self.verify_transaction(tx.clone()))
+            .and_then(|_| self.validate_transaction(&tx))
             .and_then(|_| self.spend_input_records(&tx))
             .and_then(|_| self.add_output_records(&tx))
-            .and_then(|_| self.store_program(tx.clone()));
+            .and_then(|_| self.store_program(&tx));
         // FIXME we currently apply tx changes --program deploys-- right away
         // but this should be done in the commit phase.
 
@@ -259,7 +259,7 @@ impl SnarkVMApp {
         }
     }
 
-    fn verify_transaction(&self, transaction: Transaction) -> Result<()> {
+    fn validate_transaction(&self, transaction: &Transaction) -> Result<()> {
         let rng = &mut rand::thread_rng();
 
         let result = match transaction {
@@ -268,6 +268,8 @@ impl SnarkVMApp {
                     !self.programs.exists(deployment.program_id()),
                     "Program already exists"
                 );
+
+                // verify deployment is correct and keys are valid
                 vm::verify_deployment(deployment, rng)
             }
             Transaction::Execution {
@@ -279,6 +281,7 @@ impl SnarkVMApp {
 
                 // TODO this assumes only one transition represents the program, is this correct?
                 let stored_keys = self.programs.get(transition.program_id())?;
+
                 // only verify if we have the program available
                 // TODO review if we really need to store the program
                 if let Some((_program, keys)) = stored_keys {
@@ -289,6 +292,15 @@ impl SnarkVMApp {
                         transition.program_id()
                     ))
                 }
+            }
+            Transaction::Source { program, .. } => {
+                ensure!(
+                    !self.programs.exists(program.id()),
+                    "Program already exists"
+                );
+
+                // validate that the program is parsed correctly
+                vm::generate_program(&program.to_string()).map(|_| ())
             }
         };
 
@@ -301,7 +313,7 @@ impl SnarkVMApp {
 
     /// Apply the transaction side-effects to the application (off-ledger) state, for
     /// example adding the programs to the program store.
-    fn store_program(&self, transaction: Transaction) -> Result<()> {
+    fn store_program(&self, transaction: &Transaction) -> Result<()> {
         match transaction {
             Transaction::Deployment { deployment, .. } => self.programs.add(
                 deployment.program_id(),
@@ -313,6 +325,13 @@ impl SnarkVMApp {
                 // it's not clear that we're interested in the store here, but it's required for that function
                 // note we could've use process.load_deployment instead but that one is private
                 Ok(())
+            }
+            Transaction::Source { program, .. } => {
+                let rng = &mut rand::thread_rng();
+                let compiled_program = vm::generate_deployment(&program.to_string(), rng)?;
+
+                self.programs
+                    .add(program.id(), program, compiled_program.verifying_keys())
             }
         }
     }
@@ -328,7 +347,7 @@ impl HeightFile {
         // if height file is missing or unreadable, create a new one from zero height
         if let Ok(bytes) = std::fs::read(Self::PATH) {
             // if contents are not readable, crash intentionally
-            bincode::deserialize(&bytes).unwrap()
+            bincode::deserialize(&bytes).expect("Contents of height file are not readable")
         } else {
             std::fs::write(Self::PATH, bincode::serialize(&0i64).unwrap()).unwrap();
             0i64
