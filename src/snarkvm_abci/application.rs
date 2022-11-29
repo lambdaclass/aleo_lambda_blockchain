@@ -1,11 +1,14 @@
+use crate::program_store::ProgramStore;
+use crate::record_store::RecordStore;
 use anyhow::{anyhow, bail, ensure, Result};
 use lib::{
+    query::AbciQuery::RecordsUnspentOwned,
     transaction::Transaction,
-    vm::{self},
+    vm::{self, EncryptedRecord},
     GenesisState,
 };
 use snarkvm::prelude::Itertools;
-
+use std::str::FromStr;
 use tendermint_abci::Application;
 use tendermint_proto::abci::{
     Event, EventAttribute, RequestCheckTx, RequestDeliverTx, RequestInfo, RequestInitChain,
@@ -13,9 +16,6 @@ use tendermint_proto::abci::{
     ResponseInitChain, ResponseQuery,
 };
 use tracing::{debug, error, info};
-
-use crate::program_store::ProgramStore;
-use crate::record_store::RecordStore;
 
 /// An Tendermint ABCI application that works with a SnarkVM backend.
 /// This struct implements the ABCI application hooks, forwarding commands through
@@ -63,23 +63,35 @@ impl Application for SnarkVMApp {
 
     /// This hook is to query the application for data at the current or past height.
     fn query(&self, request: RequestQuery) -> ResponseQuery {
-        let key = match std::str::from_utf8(&request.data) {
-            Ok(s) => s,
-            Err(e) => panic!("Failed to intepret key as UTF-8: {}", e),
-        };
-        debug!("Attempting to get key: {}", key);
-        // ResponseQuery {
-        //     code: 0,
-        //     log: "does not exist".to_string(),
-        //     info: "".to_string(),
-        //     index: 0,
-        //     key: request.data,
-        //     value: Default::default(),
-        //     proof_ops: None,
-        //     height,
-        //     codespace: "".to_string(),
-        // }
-        panic!("Not implemented \"{}\"", key)
+        let RecordsUnspentOwned { address, view_key } =
+            bincode::deserialize(&request.data).unwrap();
+        info!("Fetching records");
+        // TODO: This fetches all the records from the RecordStore to filter here the
+        // owned ones. With a large database this will involve a lot of data/time
+        // so we should think of a better way to handle this. (eg. pagination or asynchronous
+        // querying)
+        // https://trello.com/c/bP8Nbs7C/170-handle-record-querying-properly-in-recordstore
+        match self.records.scan(None, None) {
+            Ok((records, _last_key)) => {
+                let result: Vec<EncryptedRecord> = records
+                    .iter()
+                    .map(|record| {
+                        EncryptedRecord::from_str(&String::from_utf8_lossy(record)).unwrap()
+                    })
+                    .filter(|record| record.is_owner(&address, &view_key))
+                    .collect();
+                ResponseQuery {
+                    value: bincode::serialize(&result).unwrap(),
+                    ..Default::default()
+                }
+            }
+            Err(e) => ResponseQuery {
+                code: 1,
+                log: format!("Error running query: {}", e),
+                info: format!("Error running query: {}", e),
+                ..Default::default()
+            },
+        }
     }
 
     /// This ABCI hook validates an incoming transaction before inserting it in the
@@ -239,7 +251,7 @@ impl SnarkVMApp {
             .iter()
             .map(|commitment| self.records.spend(commitment))
             .find(|result| result.is_err())
-            .unwrap_or_else(|| Ok(()))
+            .unwrap_or(Ok(()))
     }
 
     /// Add the tranasction output records as unspent in the record store.
@@ -253,7 +265,7 @@ impl SnarkVMApp {
                 .flat_map(|transition| transition.output_records())
                 .map(|(commitment, record)| self.records.add(*commitment, record.clone()))
                 .find(|result| result.is_err())
-                .unwrap_or_else(|| Ok(()))
+                .unwrap_or(Ok(()))
         } else {
             Ok(())
         }

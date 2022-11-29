@@ -1,9 +1,7 @@
 use anyhow::{anyhow, Result};
-
 use lib::vm::{self, Program, ProgramID, VerifyingKeyMap};
 use log::error;
 use rand::thread_rng;
-
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
 

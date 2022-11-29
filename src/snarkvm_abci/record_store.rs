@@ -1,13 +1,10 @@
-use std::collections::HashMap;
-
 use anyhow::{anyhow, Result};
-
-use lib::vm::{Ciphertext, EncryptedRecord, Field as Commitment, ViewKey};
+use lib::vm::{EncryptedRecord, Field as Commitment};
 use log::error;
-use rocksdb::WriteBatch;
+use rocksdb::{Direction, IteratorMode, WriteBatch};
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
-
 type Key = Vec<u8>;
 type Value = Vec<u8>;
 
@@ -28,11 +25,10 @@ enum Command {
     Spend(Key, SyncSender<Result<()>>),
     IsUnspent(Key, SyncSender<bool>),
     Commit,
-    #[allow(dead_code)]
     Scan {
         from: Option<Key>,
-        limit: usize,
-        reply_sender: SyncSender<(Value, Key)>,
+        limit: Option<usize>,
+        reply_sender: SyncSender<(Vec<Value>, Option<Key>)>,
     },
 }
 
@@ -137,7 +133,29 @@ impl RecordStore {
                             .write(batch)
                             .unwrap_or_else(|e| error!("failed to write to db {}", e));
                     }
-                    Command::Scan { .. } => todo!(),
+                    Command::Scan {
+                        from,
+                        limit,
+                        reply_sender: reply_to,
+                    } => {
+                        let iterator_mode = from.as_ref().map_or(IteratorMode::Start, |key| {
+                            IteratorMode::From(key, Direction::Forward)
+                        });
+                        let mut records = vec![];
+                        let mut last_key = None;
+                        for item in db_unspent.iterator(iterator_mode) {
+                            if limit.map_or(false, |l| records.len() >= l) {
+                                break;
+                            }
+                            if let Ok((key, record)) = item {
+                                records.push(record.to_vec());
+                                last_key = Some(key.to_vec());
+                            }
+                        }
+                        reply_to
+                            .send((records, last_key))
+                            .unwrap_or_else(|e| error!("{}", e));
+                    }
                 };
             }
         });
@@ -182,15 +200,20 @@ impl RecordStore {
         Ok(reply_receiver.recv()?)
     }
 
-    #[allow(dead_code)]
     /// Given an account view key, return up to `limit` record ciphertexts
     pub fn scan(
         &self,
-        _view_key: ViewKey,
-        _from: Option<Key>,
-        _limit: usize,
-    ) -> Result<(Vec<Ciphertext>, Key)> {
-        todo!()
+        from: Option<Key>,
+        limit: Option<usize>,
+    ) -> Result<(Vec<Value>, Option<Key>)> {
+        let (reply_sender, reply_receiver) = sync_channel(0);
+
+        self.command_sender.send(Command::Scan {
+            from,
+            limit,
+            reply_sender,
+        })?;
+        Ok(reply_receiver.recv()?)
     }
 }
 

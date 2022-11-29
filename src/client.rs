@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, ensure, Result};
 use clap::Parser;
 use commands::{Account, Command, Get, Program};
-use lib::{transaction::Transaction, vm, GetDecryptionResponse};
+use lib::{query::AbciQuery, transaction::Transaction, vm, GetDecryptionResponse};
 use log::debug;
 use rand::thread_rng;
 use std::collections::HashMap;
@@ -68,6 +68,16 @@ async fn run(command: Command, url: String) -> Result<String> {
             let path = account::Credentials::new()?.save()?;
             format!("Saved credentials to {}", path.to_string_lossy())
         }
+        Command::Account(Account::Balance) => {
+            let credentials =
+                account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
+
+            let records = get_records(credentials.address, credentials.view_key, &url).await?;
+            let balance = records
+                .iter()
+                .fold(0, |acc, record| acc + ***record.gates());
+            format!("Balance: {:?}", balance)
+        }
         Command::Program(Program::Deploy {
             path,
             compile_remotely,
@@ -77,7 +87,6 @@ async fn run(command: Command, url: String) -> Result<String> {
             } else {
                 generate_deployment(&path)?
             };
-
             broadcast_to_blockchain(&transaction, &url).await?;
             transaction.json()
         }
@@ -230,6 +239,39 @@ async fn broadcast_to_blockchain(transaction: &Transaction, url: &str) -> Result
     debug!("Response from CheckTx: {:?}", response);
     match response.code {
         tendermint::abci::Code::Ok => Ok(()),
+        tendermint::abci::Code::Err(code) => {
+            bail!("Error executing transaction {}: {}", code, response.log)
+        }
+    }
+}
+
+async fn get_records(
+    address: vm::Address,
+    view_key: vm::ViewKey,
+    url: &str,
+) -> Result<Vec<vm::Record>> {
+    let query = AbciQuery::RecordsUnspentOwned { address, view_key };
+    let response = query_blockchain(&query, url).await?;
+    let records: Vec<vm::EncryptedRecord> = bincode::deserialize(&response)?;
+    debug!("Records: {:?}", records);
+    Ok(records
+        .iter()
+        .map(|record| record.decrypt(&view_key).unwrap())
+        .collect())
+}
+
+async fn query_blockchain(query: &AbciQuery, url: &str) -> Result<Vec<u8>> {
+    let client = HttpClient::new(url).unwrap();
+
+    let query_serialized = bincode::serialize(&query).unwrap();
+
+    let response = client
+        .abci_query(None, query_serialized, None, true)
+        .await?;
+
+    debug!("Response from Query: {:?}", response);
+    match response.code {
+        tendermint::abci::Code::Ok => Ok(response.value),
         tendermint::abci::Code::Err(code) => {
             bail!("Error executing transaction {}: {}", code, response.log)
         }
