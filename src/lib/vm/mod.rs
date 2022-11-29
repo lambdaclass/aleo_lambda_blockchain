@@ -180,7 +180,7 @@ pub fn credits_execution(
     inputs: &[Value],
     private_key: &PrivateKey,
     rng: &mut ThreadRng,
-) -> Result<Execution> {
+) -> Result<Vec<Transition>> {
     let credits_program = Program::credits()?;
     execute(credits_program, function_name, inputs, private_key, rng)
 }
@@ -191,7 +191,7 @@ fn execute(
     inputs: &[Value],
     private_key: &PrivateKey,
     rng: &mut ThreadRng,
-) -> Result<Execution> {
+) -> Result<Vec<Transition>> {
     ensure!(
         program.contains_function(&function_name),
         "Function '{function_name}' does not exist."

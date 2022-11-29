@@ -210,8 +210,7 @@ fn generate_credits_execution(
 ) -> Result<Transaction> {
     let rng = &mut rand::thread_rng();
 
-    let execution = vm::credits_execution(function_name, &inputs, &credentials.private_key, rng)?;
-    let transitions = execution.into_transitions().collect();
+    let transitions = vm::credits_execution(function_name, &inputs, &credentials.private_key, rng)?;
 
     // using uuid here too for consistency, although in the case of Transaction::from_execution the additional fee is optional
     let id = uuid::Uuid::new_v4().to_string();
