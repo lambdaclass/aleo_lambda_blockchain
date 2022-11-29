@@ -169,7 +169,7 @@ fn generate_execution(
     let rng = &mut rand::thread_rng();
     let program_string = fs::read_to_string(path).unwrap();
 
-    let execution = vm::generate_execution(
+    let transitions = vm::generate_execution(
         &program_string,
         function_name,
         inputs,
@@ -179,7 +179,6 @@ fn generate_execution(
 
     // using uuid here too for consistency, although in the case of Transaction::from_execution the additional fee is optional
     let id = uuid::Uuid::new_v4().to_string();
-    let transitions = execution.into_transitions().collect();
     Ok(Transaction::Execution { id, transitions })
 }
 

@@ -21,7 +21,7 @@ pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Value = snarkvm::prelude::Value<Testnet3>;
 pub type Program = snarkvm::prelude::Program<Testnet3>;
 pub type Ciphertext = snarkvm::prelude::Ciphertext<Testnet3>;
-pub type Execution = snarkvm::prelude::Execution<Testnet3>;
+type Execution = snarkvm::prelude::Execution<Testnet3>;
 pub type Record = snarkvm::prelude::Record<Testnet3, snarkvm::prelude::Plaintext<Testnet3>>;
 pub type EncryptedRecord = snarkvm::prelude::Record<Testnet3, Ciphertext>;
 pub type ViewKey = snarkvm::prelude::ViewKey<Testnet3>;
@@ -161,7 +161,7 @@ pub fn generate_execution(
     inputs: &[Value],
     private_key: &PrivateKey,
     rng: &mut ThreadRng,
-) -> Result<Execution> {
+) -> Result<Vec<Transition>> {
     let program: Program = snarkvm::prelude::Program::from_str(program_string).unwrap();
     execute(program, function_name, inputs, private_key, rng)
 }
@@ -215,5 +215,5 @@ fn execute(
         rng,
     )?;
     let execution = execution.read().clone();
-    Ok(execution)
+    Ok(execution.into_transitions().collect())
 }

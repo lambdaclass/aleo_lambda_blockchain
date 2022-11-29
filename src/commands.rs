@@ -134,7 +134,7 @@ pub fn parse_input_value(input: &str) -> Result<Value> {
         return Ok(Value::Record(record));
     }
 
-    // %account is a syntactic sugar for cuerren user address
+    // %account is a syntactic sugar for current user address
     if input == "%account" {
         let credentials = account::Credentials::load()?;
         let address = credentials.address.to_string();
