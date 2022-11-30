@@ -1,14 +1,8 @@
 use crate::program_store::ProgramStore;
 use crate::record_store::RecordStore;
 use anyhow::{anyhow, bail, ensure, Result};
-use lib::{
-    query::AbciQuery::RecordsUnspentOwned,
-    transaction::Transaction,
-    vm::{self, EncryptedRecord},
-    GenesisState,
-};
+use lib::{query::AbciQuery::RecordsUnspentOwned, transaction::Transaction, vm, GenesisState};
 use snarkvm::prelude::Itertools;
-use std::str::FromStr;
 use tendermint_abci::Application;
 use tendermint_proto::abci::{
     Event, EventAttribute, RequestCheckTx, RequestDeliverTx, RequestInfo, RequestInitChain,
@@ -73,12 +67,9 @@ impl Application for SnarkVMApp {
         // https://trello.com/c/bP8Nbs7C/170-handle-record-querying-properly-in-recordstore
         match self.records.scan(None, None) {
             Ok((records, _last_key)) => {
-                let result: Vec<EncryptedRecord> = records
-                    .iter()
-                    .map(|record| {
-                        EncryptedRecord::from_str(&String::from_utf8_lossy(record)).unwrap()
-                    })
-                    .filter(|record| record.is_owner(&address, &view_key))
+                let result: Vec<(vm::Field, vm::EncryptedRecord)> = records
+                    .into_iter()
+                    .filter(|(_, record)| record.is_owner(&address, &view_key))
                     .collect();
                 ResponseQuery {
                     value: bincode::serialize(&result).unwrap(),

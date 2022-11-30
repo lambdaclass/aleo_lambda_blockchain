@@ -10,15 +10,10 @@ use std::vec;
 #[derive(Debug, Parser)]
 pub enum Account {
     New,
-    /// Fetches the records owned by the given account.
+    /// Fetches the unspent records owned by the given account.
     Records,
-    /// Fetches the records owned by the given account and calculates the final credits balance.
+    /// Fetches the unspent records owned by the given account and calculates the final credits balance.
     Balance,
-    Decrypt {
-        /// Value to decrypt
-        #[clap(short, long)]
-        value: String,
-    },
 }
 
 #[derive(Debug, Parser)]

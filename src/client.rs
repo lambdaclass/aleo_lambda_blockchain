@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, ensure, Result};
 use clap::Parser;
 use commands::{Account, Command, Get, Program};
-use lib::{query::AbciQuery, transaction::Transaction, vm, GetDecryptionResponse};
+use lib::{query::AbciQuery, transaction::Transaction, vm};
 use log::debug;
 use rand::thread_rng;
-use std::collections::HashMap;
+use serde_json::json;
 use std::fs;
 use std::path::Path;
 use tendermint_rpc::query::Query;
@@ -48,25 +48,22 @@ async fn main() {
             .init();
     }
 
-    match run(cli.command, cli.url).await {
-        Err(err) => {
-            let mut output = HashMap::new();
-            output.insert("error", err.to_string());
-            println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            std::process::exit(1);
-        }
-        Ok(output) => {
-            println!("{}", output);
-        }
-    }
+    let (exit_code, output) = match run(cli.command, cli.url).await {
+        Ok(output) => (0, output),
+        Err(err) => (1, json!({"error": err.to_string()})),
+    };
+    println!("{:#}", output);
+    std::process::exit(exit_code);
 }
 
 // TODO move to command module
-async fn run(command: Command, url: String) -> Result<String> {
+async fn run(command: Command, url: String) -> Result<serde_json::Value> {
     let output = match command {
         Command::Account(Account::New) => {
-            let path = account::Credentials::new()?.save()?;
-            format!("Saved credentials to {}", path.to_string_lossy())
+            let credentials = account::Credentials::new()?;
+            let path = credentials.save()?;
+
+            json!({"path": path, "account": credentials})
         }
         Command::Account(Account::Balance) => {
             let credentials =
@@ -75,8 +72,26 @@ async fn run(command: Command, url: String) -> Result<String> {
             let records = get_records(credentials.address, credentials.view_key, &url).await?;
             let balance = records
                 .iter()
-                .fold(0, |acc, record| acc + ***record.gates());
-            format!("Balance: {:?}", balance)
+                .fold(0, |acc, (_, _, record)| acc + ***record.gates());
+
+            json!({ "balance": balance })
+        }
+        Command::Account(Account::Records) => {
+            let credentials =
+                account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
+
+            let records = get_records(credentials.address, credentials.view_key, &url).await?;
+            let records: Vec<serde_json::Value> = records
+                .iter()
+                .map(|(commitment, ciphertext, plaintext)| {
+                    json!({
+                        "commitment": commitment,
+                        "ciphertext": ciphertext,
+                        "record": plaintext
+                    })
+                })
+                .collect();
+            json!(&records)
         }
         Command::Program(Program::Deploy {
             path,
@@ -88,7 +103,7 @@ async fn run(command: Command, url: String) -> Result<String> {
                 generate_deployment(&path)?
             };
             broadcast_to_blockchain(&transaction, &url).await?;
-            transaction.json()
+            json!(transaction)
         }
         Command::Program(Program::Execute {
             path,
@@ -100,7 +115,7 @@ async fn run(command: Command, url: String) -> Result<String> {
 
             let transaction = generate_execution(&path, function, &inputs, &credentials)?;
             broadcast_to_blockchain(&transaction, &url).await?;
-            transaction.json()
+            json!(transaction)
         }
         Command::Credits(credits) => {
             let credentials =
@@ -108,7 +123,7 @@ async fn run(command: Command, url: String) -> Result<String> {
             let transaction =
                 generate_credits_execution(credits.identifier()?, credits.inputs(), &credentials)?;
             broadcast_to_blockchain(&transaction, &url).await?;
-            transaction.json()
+            json!(transaction)
         }
         Command::Get(Get {
             transaction_id,
@@ -117,23 +132,22 @@ async fn run(command: Command, url: String) -> Result<String> {
             let transaction = get_transaction(&transaction_id, &url).await?;
 
             if !decrypt {
-                transaction.json()
+                json!(transaction)
             } else {
                 let credentials = account::Credentials::load()?;
-                let records = transaction
+                let records: Vec<vm::Record> = transaction
                     .output_records()
                     .iter()
                     .filter(|record| record.is_owner(&credentials.address, &credentials.view_key))
                     .filter_map(|record| record.decrypt(&credentials.view_key).ok())
                     .collect();
 
-                serde_json::to_string_pretty(&GetDecryptionResponse {
-                    execution: transaction,
-                    decrypted_records: records,
-                })?
+                json!({
+                    "execution": transaction,
+                    "decrypted_records": records
+                })
             }
         }
-        _ => todo!("Command has not been implemented yet"),
     };
     Ok(output)
 }
@@ -249,15 +263,19 @@ async fn get_records(
     address: vm::Address,
     view_key: vm::ViewKey,
     url: &str,
-) -> Result<Vec<vm::Record>> {
+) -> Result<Vec<(vm::Field, vm::EncryptedRecord, vm::Record)>> {
     let query = AbciQuery::RecordsUnspentOwned { address, view_key };
     let response = query_blockchain(&query, url).await?;
-    let records: Vec<vm::EncryptedRecord> = bincode::deserialize(&response)?;
+    let records: Vec<(vm::Field, vm::EncryptedRecord)> = bincode::deserialize(&response)?;
     debug!("Records: {:?}", records);
-    Ok(records
-        .iter()
-        .map(|record| record.decrypt(&view_key).unwrap())
-        .collect())
+    let records = records
+        .into_iter()
+        .map(|(commitment, ciphertext)| {
+            let record = ciphertext.decrypt(&view_key).unwrap();
+            (commitment, ciphertext, record)
+        })
+        .collect();
+    Ok(records)
 }
 
 async fn query_blockchain(query: &AbciQuery, url: &str) -> Result<Vec<u8>> {

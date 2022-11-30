@@ -42,15 +42,6 @@ impl Transaction {
         }
     }
 
-    // FIXME the output of a deployment is inconveniently big, fix that
-    // and try to remove this function in favor of standard traits
-    // we probably want standard serde serialization for transport
-    // and a pretty printed json for human display and logging
-    pub fn json(&self) -> String {
-        // consider https://crates.io/crates/attrsets
-        serde_json::to_string_pretty(self).unwrap()
-    }
-
     /// If the transaction is an execution, return the list of input record origins
     /// (in case they are record commitments).
     pub fn origin_commitments(&self) -> Vec<&vm::Field> {

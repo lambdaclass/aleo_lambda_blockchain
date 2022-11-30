@@ -3,10 +3,17 @@ use lib::vm::{EncryptedRecord, Field as Commitment};
 use log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
+
 type Key = Vec<u8>;
 type Value = Vec<u8>;
+
+/// Internal channel reply for the scan command
+type ScanReply = (Vec<(Key, Value)>, Option<Key>);
+/// Public return type for the scan command.
+type ScanResult = (Vec<(Commitment, EncryptedRecord)>, Option<Commitment>);
 
 /// The record store tracks the known unspent and spent record sets (similar to bitcoin's UTXO set)
 /// according to the transactions that are committed to the ledger.
@@ -28,7 +35,7 @@ enum Command {
     Scan {
         from: Option<Key>,
         limit: Option<usize>,
-        reply_sender: SyncSender<(Vec<Value>, Option<Key>)>,
+        reply_sender: SyncSender<ScanReply>,
     },
 }
 
@@ -148,7 +155,7 @@ impl RecordStore {
                                 break;
                             }
                             if let Ok((key, record)) = item {
-                                records.push(record.to_vec());
+                                records.push((key.to_vec(), record.to_vec()));
                                 last_key = Some(key.to_vec());
                             }
                         }
@@ -201,11 +208,8 @@ impl RecordStore {
     }
 
     /// Given an account view key, return up to `limit` record ciphertexts
-    pub fn scan(
-        &self,
-        from: Option<Key>,
-        limit: Option<usize>,
-    ) -> Result<(Vec<Value>, Option<Key>)> {
+    pub fn scan(&self, from: Option<Commitment>, limit: Option<usize>) -> Result<ScanResult> {
+        let from = from.map(|commitment| commitment.to_string().into_bytes());
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender.send(Command::Scan {
@@ -213,7 +217,20 @@ impl RecordStore {
             limit,
             reply_sender,
         })?;
-        Ok(reply_receiver.recv()?)
+
+        let (results, last_key) = reply_receiver.recv()?;
+        let last_key = last_key
+            .map(|commitment| Commitment::from_str(&String::from_utf8_lossy(&commitment)).unwrap());
+        let results = results
+            .iter()
+            .map(|(commitment, record)| {
+                let commitment =
+                    Commitment::from_str(&String::from_utf8_lossy(commitment)).unwrap();
+                let record = EncryptedRecord::from_str(&String::from_utf8_lossy(record)).unwrap();
+                (commitment, record)
+            })
+            .collect();
+        Ok((results, last_key))
     }
 }
 
