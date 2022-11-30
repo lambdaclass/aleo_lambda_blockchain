@@ -28,12 +28,11 @@ pub type Field = snarkvm::prelude::Field<Testnet3>;
 pub type Origin = snarkvm::prelude::Origin<Testnet3>;
 pub type Output = snarkvm::prelude::Output<Testnet3>;
 pub type ProgramID = snarkvm::prelude::ProgramID<Testnet3>;
-pub type Certificate = snarkvm::prelude::Certificate<Testnet3>;
 pub type VerifyingKey = snarkvm::prelude::VerifyingKey<Testnet3>;
 pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Transition = snarkvm::prelude::Transition<Testnet3>;
 
-pub type VerifyingKeyMap = IndexMap<Identifier, (VerifyingKey, Certificate)>;
+pub type VerifyingKeyMap = IndexMap<Identifier, VerifyingKey>;
 
 pub fn verify_deployment(deployment: &Deployment, rng: &mut ThreadRng) -> Result<()> {
     // Ensure the program is well-formed, by computing the stack.
@@ -44,7 +43,7 @@ pub fn verify_deployment(deployment: &Deployment, rng: &mut ThreadRng) -> Result
 
 pub fn verify_execution(
     transitions: &Vec<Transition>,
-    verifying_keys: &IndexMap<Identifier, (VerifyingKey, Certificate)>,
+    verifying_keys: &VerifyingKeyMap,
 ) -> Result<()> {
     // Ensure the number of transitions matches the program function.
     ensure!(
@@ -134,7 +133,7 @@ pub fn verify_execution(
         );
 
         // Retrieve the verifying key.
-        let (verifying_key, _) = verifying_keys
+        let verifying_key = verifying_keys
             .get(transition.function_name())
             .ok_or_else(|| anyhow!("missing verifying key"))?;
         // Ensure the proof is valid.
@@ -225,4 +224,12 @@ fn execute(
     )?;
     let execution = execution.read().clone();
     Ok(execution.into_transitions().collect())
+}
+
+pub fn get_verifying_key_map(deployment: &Deployment) -> IndexMap<Identifier, VerifyingKey> {
+    deployment
+        .verifying_keys()
+        .iter()
+        .map(|(id, vk)| (*id, vk.0.clone()))
+        .collect()
 }

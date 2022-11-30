@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Result};
-use lib::vm::{self, Program, ProgramID, VerifyingKeyMap};
-use log::error;
-use rand::thread_rng;
+use lib::vm::{Program, ProgramID, VerifyingKey, VerifyingKeyMap};
+use log::{debug, error};
+use snarkvm::parameters;
+use snarkvm::prelude::FromBytes;
+use std::str::FromStr;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
 
@@ -28,26 +30,6 @@ impl ProgramStore {
     /// Start a new record store on a new thread
     pub fn new(path: &str) -> Result<Self> {
         let db_programs = rocksdb::DB::open_default(format!("{}.deployed.db", path))?;
-
-        if !db_programs.key_may_exist("credits.aleo") {
-            // Include credits program as a string
-            let program_str =
-                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/aleo/credits.aleo"));
-            let mut rng = thread_rng();
-
-            // Compute the 'credits.aleo' program stack.
-            let deployment = vm::generate_deployment(program_str, &mut rng)?;
-            let credits_program_keys = (
-                deployment.program().clone(),
-                deployment.verifying_keys().clone(),
-            );
-            db_programs
-                .put(
-                    deployment.program_id().to_string().into_bytes(),
-                    bincode::serialize(&credits_program_keys)?,
-                )
-                .unwrap_or_else(|e| error!("failed to write to db {}", e));
-        }
 
         let (command_sender, command_receiver): (Sender<Command>, Receiver<Command>) = channel();
 
@@ -84,17 +66,16 @@ impl ProgramStore {
                             .unwrap_or_else(|e| error!("{}", e));
                     }
                     Command::Exists(program_id, reply_to) => {
-                        //for some reason `db_programs.key_may_exist(program_id);` does not work
-                        let result = !(matches!(
-                            db_programs.get(program_id.to_string().as_bytes()),
-                            Ok(None)
-                        ));
+                        let result = db_programs.key_may_exist(program_id.to_string().as_bytes());
                         reply_to.send(result).unwrap_or_else(|e| error!("{}", e));
                     }
                 };
             }
         });
-        Ok(Self { command_sender })
+        let program_store = Self { command_sender };
+
+        program_store.load_credits()?;
+        Ok(program_store)
     }
 
     /// Returns a program
@@ -135,11 +116,38 @@ impl ProgramStore {
 
         reply_receiver.recv().unwrap_or(false)
     }
+
+    fn load_credits(&self) -> Result<()> {
+        let credits_program = Program::credits()?;
+
+        if self.exists(&ProgramID::from_str("credits.aleo")?) {
+            debug!("Credits program already exists in program store");
+            Ok(())
+        } else {
+            debug!("Loading credits.aleo as part of Program Store initialization");
+            let mut key_map = VerifyingKeyMap::new();
+
+            for function_name in credits_program.functions().keys() {
+                let (_, verifying_key) = parameters::testnet3::TESTNET3_CREDITS_PROGRAM
+                    .get(&function_name.to_string())
+                    .ok_or_else(|| {
+                        anyhow!("Circuit keys for credits.aleo/{function_name}' not found")
+                    })?;
+
+                let verifying_key = VerifyingKey::from_bytes_le(verifying_key)?;
+
+                key_map.insert(*function_name, verifying_key);
+            }
+
+            self.add(credits_program.id(), &credits_program, &key_map)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use lib::vm::{self, Program};
+    use rand::thread_rng;
     use snarkvm::prelude::Testnet3;
 
     use super::*;
@@ -182,8 +190,7 @@ mod tests {
 
     #[test]
     fn credits_loaded() {
-        let program_str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/aleo/credits.aleo"));
-        let program = Program::from_str(program_str).unwrap();
+        let program = Program::credits().expect("Problem loading Credits");
 
         {
             let store = rocksdb::DB::open_default(db_path("credits")).unwrap();
@@ -205,10 +212,12 @@ mod tests {
         let program_string = fs::read_to_string(program_path).unwrap();
         let deployment = vm::generate_deployment(&program_string, &mut rng).unwrap();
 
+        let verifying_keys = vm::get_verifying_key_map(&deployment);
+
         program_store.add(
             deployment.program_id(),
             deployment.program(),
-            deployment.verifying_keys(),
+            &verifying_keys,
         )?;
 
         Ok(deployment)

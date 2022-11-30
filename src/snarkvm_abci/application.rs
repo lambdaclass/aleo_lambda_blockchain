@@ -9,6 +9,7 @@ use tendermint_proto::abci::{
     RequestQuery, ResponseCheckTx, ResponseCommit, ResponseDeliverTx, ResponseInfo,
     ResponseInitChain, ResponseQuery,
 };
+
 use tracing::{debug, error, info};
 
 /// An Tendermint ABCI application that works with a SnarkVM backend.
@@ -318,11 +319,14 @@ impl SnarkVMApp {
     /// example adding the programs to the program store.
     fn store_program(&self, transaction: &Transaction) -> Result<()> {
         match transaction {
-            Transaction::Deployment { deployment, .. } => self.programs.add(
-                deployment.program_id(),
-                deployment.program(),
-                deployment.verifying_keys(),
-            ),
+            Transaction::Deployment { deployment, .. } => {
+                let verifying_keys = vm::get_verifying_key_map(deployment);
+                self.programs.add(
+                    deployment.program_id(),
+                    deployment.program(),
+                    &verifying_keys,
+                )
+            }
             Transaction::Execution { .. } => {
                 // we run finalize to save the program in the process for later execute verification
                 // it's not clear that we're interested in the store here, but it's required for that function
@@ -333,8 +337,9 @@ impl SnarkVMApp {
                 let rng = &mut rand::thread_rng();
                 let compiled_program = vm::generate_deployment(&program.to_string(), rng)?;
 
-                self.programs
-                    .add(program.id(), program, compiled_program.verifying_keys())
+                let verifying_keys = vm::get_verifying_key_map(&compiled_program);
+
+                self.programs.add(program.id(), program, &verifying_keys)
             }
         }
     }
