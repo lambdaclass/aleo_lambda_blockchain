@@ -14,3 +14,4 @@ bin/
 .db_test
 *.db
 abci.height
+mytestnet/

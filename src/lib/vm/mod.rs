@@ -171,6 +171,14 @@ pub fn generate_execution(
     rng: &mut ThreadRng,
 ) -> Result<Vec<Transition>> {
     let program: Program = snarkvm::prelude::Program::from_str(program_string).unwrap();
+
+    // we check this on the verify side (which will run in the blockchain)
+    // repeating here just to fail early
+    ensure!(
+        !Program::is_coinbase(program.id(), &function_name),
+        "Coinbase functions cannot be called"
+    );
+
     execute(program, function_name, inputs, private_key, rng)
 }
 
@@ -194,12 +202,6 @@ fn execute(
     ensure!(
         program.contains_function(&function_name),
         "Function '{function_name}' does not exist."
-    );
-    // we check this on the verify side (which will run in the blockchain)
-    // repeating here just to fail early
-    ensure!(
-        !Program::is_coinbase(program.id(), &function_name),
-        "Coinbase functions cannot be called"
     );
 
     let stack = stack::new_init(&program)?;

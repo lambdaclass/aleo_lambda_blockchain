@@ -1,49 +1,103 @@
-/// Simple binary that loads the local aleo account and generates a credits record for it.
-/// printing it's ciphertext for standard output. This is intended to generate genesis credits
-/// for testnets.
-pub mod account;
-use std::str::FromStr;
+/// Binary that walks a list of tendermint node directories (like the default ~/.tendermint or a testnet generated node dir),
+/// assuming they also contain an aleo account credentials file, and updates their genesis files to include the genesis state
+/// expected by our abci app.
+use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+use clap::Parser;
 use lib::{
-    vm::{EncryptedRecord, Field, Identifier, ProgramID, Value},
+    vm::{self, EncryptedRecord, Field, Identifier, Value},
     GenesisState,
 };
-use snarkvm::{
-    circuit::AleoV0,
-    prelude::{Process, Testnet3},
-};
+
+/// Takes a list of node directories and updates the genesis files on each of them
+/// to include records to assign default credits to each validator and a mapping
+/// of tendermint validator address to aleo account address.
+#[derive(Debug, Parser)]
+#[clap()]
+pub struct Cli {
+    /// List of node directories.
+    /// Each one is expected to contain a config/genesis.json (with a tendermint genesis)
+    /// a config/priv_validator_key.json (with tendermint validator credentials)
+    /// and a account.json (with aleo credentials)
+    #[clap()]
+    node_dirs: Vec<PathBuf>,
+
+    /// The amount of gates to assign to each validator
+    #[clap(long, default_value = "1000")]
+    amount: u64,
+}
 
 fn main() -> Result<()> {
-    let mut rng = rand::thread_rng();
-    let credentials = account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
+    let cli: Cli = Cli::parse();
 
-    // FIXME remove reliance on process
-    let process = Process::<Testnet3>::load()?;
-    let program_id = ProgramID::from_str("credits.aleo").unwrap();
-    let function_name = Identifier::from_str("genesis").unwrap();
-    let address = Value::from_str(&credentials.address.to_string()).unwrap();
-    let args: Vec<String> = std::env::args().collect();
-    let default = "1000".to_string();
-    let amount = args.get(1).unwrap_or(&default);
-    let amount = Value::from_str(&format!("{}u64", amount)).unwrap();
+    // for each node in the testnet, map its tendermint address to its aleo account address
+    // and generate records for initial validator credits
+    let mut address_map = HashMap::new();
+    let mut genesis_records = Vec::new();
+    for node_dir in cli.node_dirs.clone() {
+        println!("processing {}", node_dir.to_string_lossy());
+
+        let aleo_account_path = node_dir.join("account.json");
+        let aleo_account: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(aleo_account_path)?)?;
+        let aleo_address = aleo_account["address"].as_str().unwrap();
+
+        let tmint_account_path = node_dir.join("config/priv_validator_key.json");
+        let tmint_account: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(tmint_account_path)?)?;
+        let tmint_address = tmint_account["address"].as_str().unwrap();
+
+        address_map.insert(tmint_address.to_string(), aleo_address.to_string());
+
+        println!("Generating record for {}", aleo_address);
+        let record = generate_record(cli.amount, &aleo_account)?;
+        genesis_records.push(record);
+    }
+
+    // update the genesis JSON with the calculated app state
+    let genesis_path = cli
+        .node_dirs
+        .first()
+        .expect("need at least one directory")
+        .join("config/genesis.json");
+    let mut genesis: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(genesis_path)?)?;
+    let genesis_state = GenesisState {
+        records: genesis_records,
+        validators: address_map,
+    };
+    genesis.as_object_mut().unwrap().insert(
+        "app_state".to_string(),
+        serde_json::to_value(genesis_state)?,
+    );
+    let genesis_json = serde_json::to_string_pretty(&genesis)?;
+
+    // set the same genesis file in all nodes of the testnet
+    for node_dir in cli.node_dirs {
+        let node_genesis_path = node_dir.join("config/genesis.json");
+        println!("Writing genesis to {}", node_genesis_path.to_string_lossy());
+        std::fs::write(node_genesis_path, &genesis_json)?;
+    }
+    Ok(())
+}
+
+fn generate_record(
+    gates: u64,
+    credentials: &serde_json::Value,
+) -> Result<(vm::Field, vm::EncryptedRecord)> {
+    let mut rng = rand::thread_rng();
+
+    let function_name = Identifier::from_str("genesis")?;
+    let address = Value::from_str(credentials["address"].as_str().unwrap())?;
+    let amount = Value::from_str(&format!("{}u64", gates)).unwrap();
     let inputs = vec![address, amount];
 
-    let authorization = process.authorize::<AleoV0, _>(
-        &credentials.private_key,
-        &program_id,
-        function_name,
-        &inputs,
-        &mut rng,
-    )?;
-    let (_response, execution) = process.execute::<AleoV0, _>(authorization, &mut rng)?;
-    let transition = execution.peek().unwrap();
-    let outputs: Vec<(Field, EncryptedRecord)> = transition
-        .output_records()
-        .map(|(c, r)| (*c, r.clone()))
-        .collect();
-    let genesis = GenesisState { records: outputs };
-    println!("{}", serde_json::to_string(&genesis).unwrap());
+    let private_key = vm::PrivateKey::from_str(credentials["private_key"].as_str().unwrap())?;
+    let transitions = vm::credits_execution(function_name, &inputs, &private_key, &mut rng)?;
+    let transition = transitions.first().unwrap();
+    let outputs: Vec<(&Field, &EncryptedRecord)> = transition.output_records().collect();
 
-    Ok(())
+    let record = outputs.first().unwrap();
+    Ok((*record.0, record.1.clone()))
 }

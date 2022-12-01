@@ -1,4 +1,4 @@
-.PHONY: tendermint reset abci build cli genesis
+.PHONY: tendermint reset abci build cli genesis tendermint_config testnet
 
 OS := $(shell uname | tr '[:upper:]' '[:lower:]')
 
@@ -8,7 +8,7 @@ else
 ARCH=amd64
 endif
 
-TENDERMINT_GENESIS=~/.tendermint/config/genesis.json
+TENDERMINT_HOME=~/.tendermint/
 
 # Build the client program and put it in bin/aleo
 cli:
@@ -23,17 +23,28 @@ bin/tendermint:
 
 # initialize tendermint and write a genesis file for a local testnet.
 genesis: bin/tendermint cli
-	test -f ~/.aleo/account.json || bin/aleo account new
+	test -f $(TENDERMINT_HOME)/account.json || ALEO_HOME=$(TENDERMINT_HOME) bin/aleo account new
 	bin/tendermint init
-	cat $(TENDERMINT_GENESIS) | jq ".app_state = $$(cargo run --bin genesis --release -q)" > genesis.json.temp
-	mv genesis.json.temp $(TENDERMINT_GENESIS)
+	cargo run --bin genesis --release -- $(TENDERMINT_HOME)
 
 # Run a tendermint node, installing it if necessary
-# Note: manually setting the max_body_bytes config here. if we need to update other values find a more visible/sustainable way.
-node: genesis
-	sed -i.bak 's/max_body_bytes = 1000000/max_body_bytes = 12000000/g' ~/.tendermint/config/config.toml
-	sed -i.bak 's/max_tx_bytes = 1048576/max_tx_bytes = 10485770/g' ~/.tendermint/config/config.toml
+node: genesis tendermint_config
 	bin/tendermint node --consensus.create_empty_blocks_interval="8s"
+
+# Override a tendermint node's default configuration. NOTE: we should do something more declarative if we need to update more settings.
+tendermint_config:
+	sed -i.bak 's/max_body_bytes = 1000000/max_body_bytes = 12000000/g' $(TENDERMINT_HOME)/config/config.toml
+	sed -i.bak 's/max_tx_bytes = 1048576/max_tx_bytes = 10485770/g' $(TENDERMINT_HOME)/config/config.toml
+
+# Initialize the tendermint configuration for a testnet of the given amount of validators
+testnet: VALIDATORS:=4
+testnet: bin/tendermint cli
+	bin/tendermint testnet --v $(VALIDATORS)
+	for node in mytestnet/*/ ; do \
+	  ALEO_HOME=$$node bin/aleo account new ; \
+          make tendermint_config TENDERMINT_HOME=$$node ; \
+	done
+	cargo run --bin genesis --release -- mytestnet/*
 
 # remove the blockchain data
 reset: bin/tendermint
