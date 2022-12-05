@@ -79,8 +79,8 @@ impl Application for SnarkVMApp {
             }
             Err(e) => ResponseQuery {
                 code: 1,
-                log: format!("Error running query: {}", e),
-                info: format!("Error running query: {}", e),
+                log: format!("Error running query: {e}"),
+                info: format!("Error running query: {e}"),
                 ..Default::default()
             },
         }
@@ -104,8 +104,8 @@ impl Application for SnarkVMApp {
         if let Err(err) = result {
             ResponseCheckTx {
                 code: 1,
-                log: format!("Could not verify transaction: {}", err),
-                info: format!("Could not verify transaction: {}", err),
+                log: format!("Could not verify transaction: {err}"),
+                info: format!("Could not verify transaction: {err}"),
                 ..Default::default()
             }
         } else {
@@ -157,8 +157,8 @@ impl Application for SnarkVMApp {
             }
             Err(e) => ResponseDeliverTx {
                 code: 1,
-                log: format!("Error delivering transaction: {}", e),
-                info: format!("Error delivering transaction: {}", e),
+                log: format!("Error delivering transaction: {e}"),
+                info: format!("Error delivering transaction: {e}"),
                 ..Default::default()
             },
         }

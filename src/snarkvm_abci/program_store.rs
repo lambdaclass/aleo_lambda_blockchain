@@ -29,7 +29,7 @@ enum Command {
 impl ProgramStore {
     /// Start a new record store on a new thread
     pub fn new(path: &str) -> Result<Self> {
-        let db_programs = rocksdb::DB::open_default(format!("{}.deployed.db", path))?;
+        let db_programs = rocksdb::DB::open_default(format!("{path}.deployed.db"))?;
 
         let (command_sender, command_receiver): (Sender<Command>, Receiver<Command>) = channel();
 

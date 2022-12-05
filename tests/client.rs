@@ -121,7 +121,7 @@ fn decrypt_records() {
 
     assert_eq!(amount.to_string(), "1u64.private");
     assert_eq!(gates.to_string(), "0u64.private");
-    assert_eq!(owner.to_string(), format!("{}.private", address));
+    assert_eq!(owner.to_string(), format!("{address}.private"));
 
     let (_acc_file, home_path, _) = &new_account();
 
@@ -373,7 +373,7 @@ fn random_nonce() -> String {
         })
         .collect();
 
-    format!("{}group.public", nonce)
+    format!("{nonce}group.public")
 }
 
 /// Generate a tempfile with account credentials and return it along with the aleo home path.
@@ -402,10 +402,10 @@ fn load_program(program_name: &str) -> (NamedTempFile, String) {
     let program_file = NamedTempFile::new(program_name).unwrap();
     let path = program_file.path().to_string_lossy().to_string();
     // FIXME hardcoded path
-    let source = fs::read_to_string(format!("aleo/{}.aleo", program_name)).unwrap();
+    let source = fs::read_to_string(format!("aleo/{program_name}.aleo")).unwrap();
     // randomize the name so it's different on every test
     let source = source.replace(
-        &format!("{}.aleo", program_name),
+        &format!("{program_name}.aleo"),
         &format!("{}{}.aleo", program_name, unique_id()),
     );
     fs::write(&path, source).unwrap();

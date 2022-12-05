@@ -47,11 +47,11 @@ impl RecordStore {
         // we may also like to try something other than rocksdb here, e.g. sqlite
 
         // DB to track unspent record commitments and ciphertexts. These come from execution outputs and can be used as inputs in the future.
-        let db_unspent = rocksdb::DB::open_default(format!("{}.unspent.db", path))?;
+        let db_unspent = rocksdb::DB::open_default(format!("{path}.unspent.db"))?;
 
         // DB to track spent record commitments and ciphertexts. These are tracked to ensure that records aren't spent more than once
         // (without having to _know_ the actual record contents).
-        let db_spent = rocksdb::DB::open_default(format!("{}.spent.db", path))?;
+        let db_spent = rocksdb::DB::open_default(format!("{path}.spent.db"))?;
 
         // map to store temporary unspent record additions until a block is comitted.
         let mut buffer_unspent = HashMap::new();
@@ -298,7 +298,7 @@ mod tests {
             .unwrap_err()
             .root_cause()
             .to_string();
-        assert_eq!(format!("record {} already exists", commitment), msg);
+        assert_eq!(format!("record {commitment} already exists"), msg);
         store.commit().unwrap();
 
         let (record, commitment) = new_record();
@@ -309,7 +309,7 @@ mod tests {
             .unwrap_err()
             .root_cause()
             .to_string();
-        assert_eq!(format!("record {} already exists", commitment), msg);
+        assert_eq!(format!("record {commitment} already exists"), msg);
 
         // FIXME patching rocksdb weird behavior
         std::mem::forget(store);
@@ -413,7 +413,7 @@ mod tests {
         let randomizer = Uniform::rand(rng);
         let nonce = Testnet3::g_scalar_multiply(&randomizer);
         let record = PublicRecord::from_str(
-            &format!("{{ owner: aleo1d5hg2z3ma00382pngntdp68e74zv54jdxy249qhaujhks9c72yrs33ddah.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {}.public }}", nonce),
+            &format!("{{ owner: aleo1d5hg2z3ma00382pngntdp68e74zv54jdxy249qhaujhks9c72yrs33ddah.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {nonce}.public }}"),
         ).unwrap();
         let program_id = ProgramID::from_str("foo.aleo").unwrap();
         let name = Identifier::from_str("bar").unwrap();

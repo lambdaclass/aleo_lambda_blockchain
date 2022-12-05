@@ -78,7 +78,7 @@ impl std::fmt::Display for Transaction {
             Transaction::Execution { id, transitions } => {
                 let transition = transitions.first().unwrap();
                 let program_id = transition.program_id();
-                write!(f, "Execution({},{})", program_id, id)
+                write!(f, "Execution({program_id},{id})")
             }
         }
     }

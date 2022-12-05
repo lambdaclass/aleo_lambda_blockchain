@@ -50,7 +50,7 @@ fn main() -> Result<()> {
 
         address_map.insert(tmint_address.to_string(), aleo_address.to_string());
 
-        println!("Generating record for {}", aleo_address);
+        println!("Generating record for {aleo_address}");
         let record = generate_record(cli.amount, &aleo_account)?;
         genesis_records.push(record);
     }
@@ -90,7 +90,7 @@ fn generate_record(
 
     let function_name = Identifier::from_str("genesis")?;
     let address = Value::from_str(credentials["address"].as_str().unwrap())?;
-    let amount = Value::from_str(&format!("{}u64", gates)).unwrap();
+    let amount = Value::from_str(&format!("{gates}u64")).unwrap();
     let inputs = vec![address, amount];
 
     let private_key = vm::PrivateKey::from_str(credentials["private_key"].as_str().unwrap())?;
