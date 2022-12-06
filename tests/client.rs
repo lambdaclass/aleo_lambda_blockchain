@@ -305,17 +305,18 @@ fn test_remote_compilation_race() {
     let _ = retry_command(Some(home_path), &["get", transaction.id()]);
 }
 
-#[ignore]
 #[test]
 fn transfer_credits() {
-    let host_balance = get_balance(None);
+    let path = get_address_with_credits();
 
-    let record = get_record(None);
+    let host_balance = get_balance(Some(&path));
+
+    let record = get_record(Some(&path));
 
     let (_tempfile, home_path, credentials) = &new_account();
 
-    retry_command(
-        None,
+    let _ = retry_command(
+        Some(&path),
         &[
             "credits",
             "transfer",
@@ -323,11 +324,10 @@ fn transfer_credits() {
             credentials.get("address").unwrap(),
             "10u64",
         ],
-    )
-    .unwrap();
+    );
 
     let result = retry::retry(Fixed::from_millis(1000).take(10), || {
-        let host_final_balance = get_balance(None);
+        let host_final_balance = get_balance(Some(&path));
         if host_final_balance == host_balance - 10 {
             Ok(())
         } else {
@@ -508,4 +508,12 @@ fn execute_client_command(
         .try_success()
         .map(parse_output)
         .map_err(|e| e.to_string())
+}
+
+fn get_address_with_credits() -> String {
+    dirs::home_dir()
+        .unwrap()
+        .join(".tendermint")
+        .to_string_lossy()
+        .into()
 }
