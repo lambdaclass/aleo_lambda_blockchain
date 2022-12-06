@@ -305,6 +305,7 @@ fn test_remote_compilation_race() {
     let _ = retry_command(Some(home_path), &["get", transaction.id()]);
 }
 
+#[ignore]
 #[test]
 fn transfer_credits() {
     let host_balance = get_balance(None);

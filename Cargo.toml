@@ -15,9 +15,9 @@ doctest = false
 name = "lib"
 
 [[bin]]
-name = "client"
-path = "src/client.rs"
-test = false
+path = "src/client/main.rs"
+doctest = false
+name =  "client"
 
 [[bin]]
 name = "genesis"

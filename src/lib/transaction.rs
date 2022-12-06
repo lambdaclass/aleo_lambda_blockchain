@@ -1,6 +1,11 @@
 use crate::vm::{self};
+use anyhow::Result;
+use log::debug;
+use rand;
 use serde::{Deserialize, Serialize};
 use snarkvm::prelude::{Ciphertext, Record, Testnet3};
+use std::fs;
+use std::path::Path;
 
 // Until we settle on one of the alternatives depending on performance, we have 2 variants for deployment transactions:
 // Transaction::Deployment generates verifying keys offline and sends them to the network along with the program
@@ -22,6 +27,56 @@ pub enum Transaction {
 }
 
 impl Transaction {
+    // Used to generate deployment of a new program in path
+    pub fn deployment(path: &Path) -> Result<Self> {
+        let program_string = fs::read_to_string(path).unwrap();
+        let mut rng = rand::thread_rng();
+        debug!("Deploying program {}", program_string);
+        let deployment = vm::generate_deployment(&program_string, &mut rng)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        Ok(Self::Deployment {
+            id,
+            deployment: Box::new(deployment),
+        })
+    }
+
+    // Used to generate an execution of a program in path or an execution of the credits program
+    pub fn execution(
+        path: Option<&Path>,
+        function_name: vm::Identifier,
+        inputs: &[vm::Value],
+        private_key: &vm::PrivateKey,
+    ) -> Result<Self> {
+        let rng = &mut rand::thread_rng();
+
+        let transitions = if let Some(path) = path {
+            let program_string = fs::read_to_string(path).unwrap();
+
+            vm::generate_execution(&program_string, function_name, inputs, private_key, rng)?
+        } else {
+            vm::credits_execution(function_name, inputs, private_key, rng)?
+        };
+
+        let id = uuid::Uuid::new_v4().to_string();
+
+        Ok(Self::Execution { id, transitions })
+    }
+
+    // Used to generate a deployment without generating the verifying keys locally
+    pub fn from_source(path: &Path) -> Result<Self> {
+        let program_string = fs::read_to_string(path).unwrap();
+
+        debug!("Deploying non-compiled program {}", program_string);
+
+        let program = vm::generate_program(&program_string)?;
+
+        let id = uuid::Uuid::new_v4().to_string();
+        Ok(Transaction::Source {
+            id,
+            program: Box::new(program),
+        })
+    }
+
     pub fn id(&self) -> &str {
         match self {
             Transaction::Deployment { id, .. } => id,
