@@ -8,6 +8,7 @@ use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt};
 mod application;
 mod program_store;
 mod record_store;
+mod validator_set;
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about)]

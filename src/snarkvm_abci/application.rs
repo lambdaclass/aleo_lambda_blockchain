@@ -1,14 +1,12 @@
-use crate::program_store::ProgramStore;
+use std::sync::{Arc, Mutex};
+
 use crate::record_store::RecordStore;
+use crate::{program_store::ProgramStore, validator_set::ValidatorSet};
 use anyhow::{anyhow, bail, ensure, Result};
 use lib::{query::AbciQuery::RecordsUnspentOwned, transaction::Transaction, vm, GenesisState};
 use snarkvm::prelude::Itertools;
 use tendermint_abci::Application;
-use tendermint_proto::abci::{
-    Event, EventAttribute, RequestCheckTx, RequestDeliverTx, RequestInfo, RequestInitChain,
-    RequestQuery, ResponseCheckTx, ResponseCommit, ResponseDeliverTx, ResponseInfo,
-    ResponseInitChain, ResponseQuery,
-};
+use tendermint_proto::abci;
 
 use tracing::{debug, error, info};
 
@@ -20,32 +18,45 @@ use tracing::{debug, error, info};
 pub struct SnarkVMApp {
     records: RecordStore,
     programs: ProgramStore,
+
+    // NOTE: Wrapping in mutex here because we need mut access to ValidatorSet and the alternative to setup
+    // a channel was overkilll for this particular case. Also, at the moment we only ever access these field
+    // from a single tendermint abci connection (the consensus connection), but using Rc instead of Arc would
+    // introduce subtle bugs should that ever change.
+    validators: Arc<Mutex<ValidatorSet>>,
 }
 
 impl Application for SnarkVMApp {
     /// This hook is called once upon genesis. It's used to load a default set of records which
     /// make the initial distribution of credits in the system.
-    fn init_chain(&self, request: RequestInitChain) -> ResponseInitChain {
+    fn init_chain(&self, request: abci::RequestInitChain) -> abci::ResponseInitChain {
         info!("Loading genesis");
         let state: GenesisState =
             serde_json::from_slice(&request.app_state_bytes).expect("invalid genesis state");
+
         for (commitment, record) in state.records {
             debug!("Storing genesis record {}", commitment);
             self.records
                 .add(commitment, record)
                 .expect("failure adding genesis records");
         }
+
+        self.validators
+            .lock()
+            .unwrap()
+            .set_validators(state.validators);
+
         Default::default()
     }
 
     /// This hook provides information about the ABCI application.
-    fn info(&self, request: RequestInfo) -> ResponseInfo {
+    fn info(&self, request: abci::RequestInfo) -> abci::ResponseInfo {
         debug!(
             "Got info request. Tendermint version: {}; Block version: {}; P2P version: {}",
             request.version, request.block_version, request.p2p_version
         );
 
-        ResponseInfo {
+        abci::ResponseInfo {
             data: "snarkvm-app".to_string(),
             version: "0.1.0".to_string(),
             app_version: 1,
@@ -57,7 +68,7 @@ impl Application for SnarkVMApp {
     }
 
     /// This hook is to query the application for data at the current or past height.
-    fn query(&self, request: RequestQuery) -> ResponseQuery {
+    fn query(&self, request: abci::RequestQuery) -> abci::ResponseQuery {
         let RecordsUnspentOwned { address, view_key } =
             bincode::deserialize(&request.data).unwrap();
         info!("Fetching records");
@@ -72,12 +83,12 @@ impl Application for SnarkVMApp {
                     .into_iter()
                     .filter(|(_, record)| record.is_owner(&address, &view_key))
                     .collect();
-                ResponseQuery {
+                abci::ResponseQuery {
                     value: bincode::serialize(&result).unwrap(),
                     ..Default::default()
                 }
             }
-            Err(e) => ResponseQuery {
+            Err(e) => abci::ResponseQuery {
                 code: 1,
                 log: format!("Error running query: {e}"),
                 info: format!("Error running query: {e}"),
@@ -88,7 +99,7 @@ impl Application for SnarkVMApp {
 
     /// This ABCI hook validates an incoming transaction before inserting it in the
     /// mempool and relaying it to other nodes.
-    fn check_tx(&self, request: RequestCheckTx) -> ResponseCheckTx {
+    fn check_tx(&self, request: abci::RequestCheckTx) -> abci::ResponseCheckTx {
         info!("Check Tx");
 
         let tx = bincode::deserialize(&request.tx).unwrap();
@@ -102,23 +113,65 @@ impl Application for SnarkVMApp {
             .and_then(|_| self.validate_transaction(&tx));
 
         if let Err(err) = result {
-            ResponseCheckTx {
+            abci::ResponseCheckTx {
                 code: 1,
                 log: format!("Could not verify transaction: {err}"),
                 info: format!("Could not verify transaction: {err}"),
                 ..Default::default()
             }
         } else {
-            ResponseCheckTx {
+            abci::ResponseCheckTx {
                 ..Default::default()
             }
         }
     }
 
+    /// This hook is called before the app starts processing transactions on a block.
+    /// Used to store current proposer and the previous block's voters to assign fees and coinbase
+    /// credits when the block is committed.
+    fn begin_block(&self, request: abci::RequestBeginBlock) -> abci::ResponseBeginBlock {
+        // a call to begin block without header doesn't seem to make sense, verify it can happen
+        // supporting this case is cumbersome, assuming it won't happen until proven wrong
+        let header = request
+            .header
+            .expect("received block without header, aborting");
+
+        // store current block proposer and previous block voters in the validator set
+        // NOTE: because of how tendermint makes information available to this hook,
+        // the block rewards go to this block's porposer and the **previous** block voters.
+        // This could be revisited if it's a problem.
+        let votes = request
+            .last_commit_info
+            .map(|last_commit| last_commit.votes)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|vote_info| {
+                if !vote_info.signed_last_block {
+                    // don't count validators that didn't participate in previous round
+                    return None;
+                }
+
+                if let Some(validator) = vote_info.validator.clone() {
+                    Some((validator.address, validator.power as u64))
+                } else {
+                    // If there's no associated validator data, we can't use this vote
+                    None
+                }
+            })
+            .collect();
+        self.validators.lock().unwrap().prepare(
+            header.proposer_address.clone(),
+            votes,
+            header.height as u64,
+        );
+
+        Default::default()
+    }
+
     /// This ABCI hook validates a transaction and applies it to the application state,
     /// for example storing the program verifying keys upon a valid deployment.
     /// Here is also where transactions are indexed for querying the blockchain.
-    fn deliver_tx(&self, request: RequestDeliverTx) -> ResponseDeliverTx {
+    fn deliver_tx(&self, request: abci::RequestDeliverTx) -> abci::ResponseDeliverTx {
         info!("Deliver Tx");
 
         let tx: Transaction = bincode::deserialize(&request.tx).unwrap();
@@ -132,6 +185,7 @@ impl Application for SnarkVMApp {
             .check_no_duplicate_records(&tx)
             .and_then(|_| self.check_inputs_are_unspent(&tx))
             .and_then(|_| self.validate_transaction(&tx))
+            .and_then(|_| self.collect_fees(&tx))
             .and_then(|_| self.spend_input_records(&tx))
             .and_then(|_| self.add_output_records(&tx))
             .and_then(|_| self.store_program(&tx));
@@ -141,21 +195,21 @@ impl Application for SnarkVMApp {
         match result {
             Ok(_) => {
                 // prepare this transaction to be queried by app.tx_id
-                let index_event = Event {
+                let index_event = abci::Event {
                     r#type: "app".to_string(),
-                    attributes: vec![EventAttribute {
+                    attributes: vec![abci::EventAttribute {
                         key: "tx_id".to_string().into_bytes(),
                         value: tx.id().to_string().into_bytes(),
                         index: true,
                     }],
                 };
 
-                ResponseDeliverTx {
+                abci::ResponseDeliverTx {
                     events: vec![index_event],
                     ..Default::default()
                 }
             }
-            Err(e) => ResponseDeliverTx {
+            Err(e) => abci::ResponseDeliverTx {
                 code: 1,
                 log: format!("Error delivering transaction: {e}"),
                 info: format!("Error delivering transaction: {e}"),
@@ -169,7 +223,8 @@ impl Application for SnarkVMApp {
     /// hook is running.
     /// The result includes a hash of the application state which will be included in the block header.
     /// This hash should be deterministic, different app state hashes will produce blockchain forks.
-    fn commit(&self) -> ResponseCommit {
+    /// New credits records are created to assign validator rewards.
+    fn commit(&self) -> abci::ResponseCommit {
         // the app hash is intended to capture the state of the application that's not contained directly
         // in the blockchain transactions (as tendermint already accounts for that with other hashes).
         // we could do something in the RecordStore and ProgramStore to track state changes there and
@@ -188,8 +243,14 @@ impl Application for SnarkVMApp {
 
         let height = HeightFile::increment();
 
+        for (commitment, record) in self.validators.lock().unwrap().rewards() {
+            if let Err(err) = self.records.add(commitment, record) {
+                error!("Failed to add reward record to store {}", err);
+            }
+        }
+
         info!("Committing height {}", height);
-        ResponseCommit {
+        abci::ResponseCommit {
             data: app_hash,
             retain_height: 0,
         }
@@ -200,9 +261,10 @@ impl SnarkVMApp {
     /// Constructor.
     pub fn new() -> Self {
         Self {
+            // we rather crash than start with badly initialized stores
             programs: ProgramStore::new("programs").expect("could not create a program store"),
-            // we rather crash than start with a badly initialized store
             records: RecordStore::new("records").expect("could not create a record store"),
+            validators: Arc::new(Mutex::new(ValidatorSet::new("abci.validators"))),
         }
     }
 
@@ -313,6 +375,26 @@ impl SnarkVMApp {
             _ => info!("Transaction {} verification successful", transaction),
         };
         result
+    }
+
+    /// Add the transaction fees to the current block's validator rewards.
+    fn collect_fees(&self, transaction: &Transaction) -> Result<()> {
+        let fees = match transaction {
+            Transaction::Deployment { .. } => {
+                // TODO deployment should have an optional fee transition
+                0
+            }
+            Transaction::Source { .. } => {
+                // TODO deployment should have an optional fee transition
+                0
+            }
+            Transaction::Execution { transitions, .. } => transitions
+                .iter()
+                .fold(0, |acc, transition| acc + transition.fee()),
+        };
+
+        self.validators.lock().unwrap().add(fees as u64);
+        Ok(())
     }
 
     /// Apply the transaction side-effects to the application (off-ledger) state, for

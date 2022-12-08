@@ -6,9 +6,15 @@ use anyhow::{anyhow, bail, ensure, Result};
 use log::debug;
 use parking_lot::{lock_api::RwLock, RawRwLock};
 use rand::rngs::ThreadRng;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use snarkvm::{
     circuit::{AleoV0, IndexMap},
-    prelude::{CallStack, Environment, Network, Testnet3, ToField, I64},
+    console::types::string::Integer,
+    prelude::{
+        Balance, CallStack, Environment, Literal, Network, Owner, Plaintext, Testnet3, ToField,
+        Uniform, I64,
+    },
 };
 
 use snarkvm::prelude::One;
@@ -51,6 +57,7 @@ pub fn verify_execution(
         "There are no transitions in the execution"
     );
 
+    // FIXME this should include a check that fee isn't negative
     // Verify each transition.
     for transition in transitions {
         debug!(
@@ -234,4 +241,32 @@ pub fn get_verifying_key_map(deployment: &Deployment) -> IndexMap<Identifier, Ve
         .iter()
         .map(|(id, vk)| (*id, vk.0.clone()))
         .collect()
+}
+
+/// Generate a credits record of the given amount for the given owner,
+/// by using the given seed to deterministically generate a nonce.
+pub fn mint_credits(
+    owner_address: Address,
+    credits: u64,
+    seed: u64,
+) -> Result<(Field, EncryptedRecord)> {
+    // TODO have someone verify/audit this, probably it's unsafe or breaks cryptographic assumptions
+
+    let owner = Owner::Private(Plaintext::Literal(
+        Literal::Address(owner_address),
+        Default::default(),
+    ));
+    let amount = Integer::new(credits);
+    let gates = Balance::Private(Plaintext::Literal(Literal::U64(amount), Default::default()));
+    let empty_data = IndexMap::new();
+
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let randomizer = Uniform::rand(&mut rng);
+    let nonce = Testnet3::g_scalar_multiply(&randomizer);
+
+    let public_record = Record::from_plaintext(owner, gates, empty_data, nonce)?;
+    let record_name = Identifier::from_str("credits")?;
+    let commitment = public_record.to_commitment(Program::credits()?.id(), &record_name)?;
+    let encrypted_record = public_record.encrypt(randomizer)?;
+    Ok((commitment, encrypted_record))
 }

@@ -5,10 +5,7 @@ use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use anyhow::Result;
 use clap::Parser;
-use lib::{
-    vm::{self, EncryptedRecord, Field, Identifier, Value},
-    GenesisState,
-};
+use lib::{vm, GenesisState};
 
 /// Takes a list of node directories and updates the genesis files on each of them
 /// to include records to assign default credits to each validator and a mapping
@@ -41,17 +38,19 @@ fn main() -> Result<()> {
         let aleo_account_path = node_dir.join("account.json");
         let aleo_account: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(aleo_account_path)?)?;
-        let aleo_address = aleo_account["address"].as_str().unwrap();
+        let aleo_address = vm::Address::from_str(aleo_account["address"].as_str().unwrap())?;
 
         let tmint_account_path = node_dir.join("config/priv_validator_key.json");
         let tmint_account: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(tmint_account_path)?)?;
         let tmint_address = tmint_account["address"].as_str().unwrap();
 
-        address_map.insert(tmint_address.to_string(), aleo_address.to_string());
+        address_map.insert(tmint_address.to_string(), aleo_address);
 
         println!("Generating record for {aleo_address}");
-        let record = generate_record(cli.amount, &aleo_account)?;
+        // NOTE: using a hardcoded seed, not for production!
+        let seed = 123;
+        let record = vm::mint_credits(aleo_address, cli.amount, seed)?;
         genesis_records.push(record);
     }
 
@@ -80,24 +79,4 @@ fn main() -> Result<()> {
         std::fs::write(node_genesis_path, &genesis_json)?;
     }
     Ok(())
-}
-
-fn generate_record(
-    gates: u64,
-    credentials: &serde_json::Value,
-) -> Result<(vm::Field, vm::EncryptedRecord)> {
-    let mut rng = rand::thread_rng();
-
-    let function_name = Identifier::from_str("genesis")?;
-    let address = Value::from_str(credentials["address"].as_str().unwrap())?;
-    let amount = Value::from_str(&format!("{gates}u64")).unwrap();
-    let inputs = vec![address, amount];
-
-    let private_key = vm::PrivateKey::from_str(credentials["private_key"].as_str().unwrap())?;
-    let transitions = vm::credits_execution(function_name, &inputs, &private_key, &mut rng)?;
-    let transition = transitions.first().unwrap();
-    let outputs: Vec<(&Field, &EncryptedRecord)> = transition.output_records().collect();
-
-    let record = outputs.first().unwrap();
-    Ok((*record.0, record.1.clone()))
 }

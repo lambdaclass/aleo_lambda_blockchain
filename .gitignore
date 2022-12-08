@@ -13,5 +13,5 @@ hello/build
 bin/
 .db_test
 *.db
-abci.height
+abci.*
 mytestnet/

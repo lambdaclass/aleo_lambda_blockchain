@@ -50,7 +50,7 @@ testnet: bin/tendermint cli
 reset: bin/tendermint
 	rm -rf ~/.tendermint
 	rm -rf *.db/
-	rm -f abci.height
+	rm -f abci.*
 	bin/tendermint unsafe_reset_all
 
 # run the snarkvm tendermint application

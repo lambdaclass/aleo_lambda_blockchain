@@ -307,16 +307,21 @@ fn test_remote_compilation_race() {
 
 #[test]
 fn transfer_credits() {
-    let path = get_address_with_credits();
+    let validator_home = get_address_with_credits();
 
-    let host_balance = get_balance(Some(&path));
+    // assuming the first record has more than 10 credits
+    let record = execute_client_command(Some(&validator_home), &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    let record = get_record(Some(&path));
+    let (_tempfile, receiver_home, credentials) = &new_account();
 
-    let (_tempfile, home_path, credentials) = &new_account();
-
-    let _ = retry_command(
-        Some(&path),
+    execute_client_command(
+        Some(&validator_home),
         &[
             "credits",
             "transfer",
@@ -324,21 +329,20 @@ fn transfer_credits() {
             credentials.get("address").unwrap(),
             "10u64",
         ],
-    );
+    )
+    .unwrap();
 
-    let result = retry::retry(Fixed::from_millis(1000).take(10), || {
-        let host_final_balance = get_balance(Some(&path));
-        if host_final_balance == host_balance - 10 {
+    // check the the account received the balance
+    // (validator balance can't be checked because it could receive a reward while the test is running)
+    retry::retry(Fixed::from_millis(1000).take(10), || {
+        let receiver_balance = get_balance(Some(receiver_home));
+        if receiver_balance == 10 {
             Ok(())
         } else {
             Err(())
         }
-    });
-
-    assert!(result.is_ok());
-
-    let receiver_balance = get_balance(Some(home_path));
-    assert_eq!(receiver_balance, 10);
+    })
+    .unwrap();
 }
 
 // HELPERS
@@ -470,16 +474,6 @@ fn get_balance(path: Option<&str>) -> u64 {
         .unwrap()
         .as_u64()
         .unwrap()
-}
-
-fn get_record(path: Option<&str>) -> String {
-    execute_client_command(path, &["account", "records"])
-        .unwrap()
-        .pointer("/0/ciphertext")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string()
 }
 
 fn execute_program(
