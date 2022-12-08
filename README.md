@@ -5,8 +5,11 @@ MVP for an aleo blockchain. The current implementation uses a thin wrapper aroun
 ## Project structure
 
 * [aleo/](./aleo): example aleo instruction programs
-* [src/cli.rs](./src/cli.rs): CLI program to interacto with the VM and the blockchain (e.g. create an acocut, deploy and execute programs)
+* [src/client/](./src/client/): CLI program to interact with the VM and the blockchain (e.g. create an account, deploy and execute programs)
 * [src/snarkvm_abci/](./src/snarkvm_abci): Implements the [Application Blockchain Interface](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview) (ABCI) to connect the aleo specific logic (e.g. program proof verification) to the Tendermint Core infrastructure.
+* [src/genesis.rs](./src/genesis.rs): Implements a helper program that generates JSON files that represent the genesis state for the ABCI app (which Tendermint requires).
+* [src/lib/](./src/lib/): Shared library used by the CLI and the ABCI.
+
 
 ## Running a single-node blockchain
 
@@ -30,8 +33,8 @@ In another terminal run the tendermint node:
 make node
 ```
 
-This will download and install tendermint if necessary. Alternatively, [these instructions](https://github.com/tendermint/tendermint/blob/main/docs/introduction/install.md) can be used.
-Be sure to checkout version `0.34.x` as current rust abci implementation does not support `0.35.0` (`0.35.0` has not been released yet).
+This will download and install tendermint if necessary. Alternatively, [these instructions](https://github.com/tendermint/tendermint/blob/main/docs/introduction/install.md) can be used. This will also generate the genesis file for the starting state of the blockchain.
+Be sure to checkout version `0.34.x` as current rust abci implementation does not support `0.35.0` (`0.34` is the latest public release).
 
 At this point, both terminals should start to exchange messages and `Commited height` should start to grow.
 
@@ -45,57 +48,51 @@ Create an aleo account:
 
     bin/aleo account new
 
-This will generate an account address and the credentials necessary to generate execution proofs. Now run the client app to deploy an aleo program:
+This will generate an account address and the credentials necessary to generate execution proofs, located by default on `~/.aleo/account.json`. This path can be overridden by setting the env var `ALEO_HOME`. Now run the client app to deploy an aleo program:
 
 ```shell
 bin/aleo program deploy aleo/hello.aleo
 ```
 
-That should take some time to create the deployment transaction and send it to tendermint. In the client terminal you should see something like:
+That should take some time to create the deployment transaction and send it to the Tendermint network. In the client terminal you should see a JSON response similar to the following one:
 
 ```
-2022-11-07T20:37:19.377Z INFO [client] Deploying program program hello.aleo;
-
-function hello:
-    input r0 as u32.public;
-    input r1 as u32.private;
-    add r0 r1 into r2;
-    output r2 as u32.private;
-
- • Loaded universal setup (in 1793 ms)
- • Built 'hello' (in 6363 ms)
- • Certified 'hello': 147 ms
-2022-11-07T20:37:32.973Z DEBUG [tendermint_rpc::client::transport::http::sealed] Outgoing request: {
-  "jsonrpc": "2.0",
-  "id": "c45e1f52-a9f1-414e-ab2c-8b02746ee349",
-  "method": "broadcast_tx_sync",
-  "params": {
-    "tx": "AAAAACQAAAAAAAAANTZhZ...
-```
-And a very long encoded transaction. Finally something like
-
-```
-2022-11-07T20:37:33.922Z DEBUG [tendermint_rpc::client::transport::http::sealed] Incoming response: {
-  "jsonrpc": "2.0",
-  "id": "c45e1f52-a9f1-414e-ab2c-8b02746ee349",
-  "result": {
-    "code": 0,
-    "data": "",
-    "log": "",
-    "codespace": "",
-    "hash": "6A58F82922F436ECF8765F7AEF90AC79BE8091A7D5AF14C121326DB5533A9339"
+{
+  "Deployment": {
+    "deployment": {
+      "edition": 0,
+      "program": "program hello.aleo;\n\nfunction hello:\n    input r0 as u32.public;\n    input r1 as u32.private;\n    add r0 r1 into r2;\n    output r2 as u32.public;\n",
+      "verifying_keys": {
+        "hello": [
+          "verifier1qqqpqqqqqqqqqqqqs57qqqqqqqqqppfuqqqqqqqqqz32sqqqqqqqqqqrmuqqqqqqqqqzeyqqqqqqqqqqpsqqqqqqqqqqpw8vnp60tq25uf470rmxydj0xjwgwnrkmsvr9s02se3dj4kpawjjxhrx42x28zfa5ayu7ypjvj5zqrsnx8kalm6fh4498er5me7jhdd29l5fplnc4mtawyfjlfldjvzz8q3p..."
+        ]
+      }
+    },
+    "id": "7999aa60-ad74-45d2-aa57-f75cb01ac653"
   }
 }
 ```
-
-With a code 0 meaning the program was successfully deployed. You should also see the transaction being received in the ABCI terminal with some message like:
+ You should also see the transaction being received in the ABCI terminal with some message like:
 
 ```
-2022-11-07T20:36:49.862776Z  INFO ThreadId(65) Check Tx
-2022-11-07T20:36:49.868743Z  INFO ThreadId(65) Verifying Execution: {"edition":0,"transitions":[{"id":"as1n0tlsr9rglamwr9tcqxf60ndpgkvhu83py79t78808w2vx95tv9q2ataeg","program":"hello.aleo","function":"hello","inputs":[{"type":"public","id":"1478829010713049050956129212113341334476706503997215127720201268298504260669field","value":"1u32"},{"type":"private","id":"375755831552960522697901416301536744612216033684938328198044587457082215962field","value":"ciphertext1qyq0lmjlsmwjwxxuxft5vw24pqj70fv76pj2q8a96m37mpyqregxzrge629d3"}],"outputs":[{"type":"private","id":"567543593766656021073803866365676200751324568935625558453747354077101654776field","value":"ciphertext1qyq265hx4fqu0edg8rdlwl44vatns7jwtn4hksfpylma3h3nm7rrxpcew67q6"}],"proof":"proof1qqqqzqqqqqqqqqqqm2uje400mwxc56umrwqj8jfefxnfnplgtcl7gc9kq68rxwnfzk...
+2022-12-06T19:13:22.456235Z  INFO ThreadId(06) Check Tx
+2022-12-06T19:13:22.691738Z  INFO ThreadId(06) Transaction Deployment(7999aa60-ad74-45d2-aa57-f75cb01ac653,hello.aleo) verification successful
+2022-12-06T19:13:22.695360Z  INFO ThreadId(07) Committing height 2
+2022-12-06T19:13:22.696073Z  INFO ThreadId(06) Check Tx
+2022-12-06T19:13:22.876382Z  INFO ThreadId(06) Transaction Deployment(7999aa60-ad74-45d2-aa57-f75cb01ac653,hello.aleo) verification successful
+2022-12-06T19:13:23.857425Z  INFO ThreadId(07) Deliver Tx
+2022-12-06T19:13:24.066973Z  INFO ThreadId(07) Transaction Deployment(7999aa60-ad74-45d2-aa57-f75cb01ac653,hello.aleo) verification successful
 ```
-and the rest of the transaction.
 
+This means that the program was deployed succesfully and stored on the blockchain. If you tried to redeploy it, you would see the following error message:
+
+```shell
+{
+  "error": "Error executing transaction 1: Could not verify transaction: Program already exists"
+}
+```
+
+Notice that transaction JSON includes an `id` field which you can retrieve by running `bin/aleo get {transaction_id}`. It will retrieve the same JSON from the blockchain if you run it.
 
 Finally to execute a program (locally) and send the execution transaction (with its proof) run in client terminal:
 
@@ -106,34 +103,43 @@ bin/aleo program execute aleo/hello.aleo hello 1u32 1u32
 The command above will run the program and send the execution to the blockchain:
 
 ```
-2022-11-07T20:44:07.702Z INFO [client] executing program hello.aleo function hello inputs [1u32, 1u32]
-🚀 Executing 'hello.aleo/hello'...
-
- • Executing 'hello.aleo/hello'...
- • Executed 'hello' (in 1151 ms)
-2022-11-07T20:44:15.817Z INFO [client] outputs [2u32]
-2022-11-07T20:44:15.817Z DEBUG [tendermint_rpc::client::transport::http::sealed] Outgoing request: {
-  "jsonrpc": "2.0",
-  "id": "3a45b4de-db1a-4d8a-a23c-dbe6180003f5",
-  "method": "broadcast_tx_sync",
-  "params": {
-    "tx": "AQAAACQAAAAAAAAAY2RkNTNlZjktM2I5Zi00N...
-```
-and finally
-```
-2022-11-07T20:44:15.830Z DEBUG [tendermint_rpc::client::transport::http::sealed] Incoming response: {
-  "jsonrpc": "2.0",
-  "id": "3a45b4de-db1a-4d8a-a23c-dbe6180003f5",
-  "result": {
-    "code": 0,
-    "data": "",
-    "log": "",
-    "codespace": "",
-    "hash": "51943117E73DC0521E0502795ADD8DC1A40856342E5A9F6516E0ECCDC66E0B13"
+{
+  "Execution": {
+    "id": "15499c5b-b0b7-46eb-87da-366f38cc485c",
+    "transitions": [
+      {
+        "fee": 0,
+        "function": "hello",
+        "id": "as1f0y0080cuvfnz5rwdm4yk90ny7pghqfxa42kg37jv403ccpvzqfquftums",
+        "inputs": [
+          {
+            "id": "525052707127338880162170750843371169229438004982085783899427530567050481836field",
+            "type": "public",
+            "value": "1u32"
+          },
+          {
+            "id": "4717481540194483200902154787515383856547973389698044767020383141679731034593field",
+            "type": "private",
+            "value": "ciphertext1qyq87903rnzu2va44zq985y0cqltr4uhkftwnqlvtsdfzwxd8cr5syqcnmfum"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "6029120002360365362314373657798705508848679817835900143138007626549923986692field",
+            "type": "public",
+            "value": "2u32"
+          }
+        ],
+        "program": "hello.aleo",
+        "proof": "proof1qqqqzqqqqqqqqqqqm0t60gjwk8k9.....",
+        "tcm": "2845314139032602383675815349790318009604197052650910442608790130653723629069field",
+        "tpk": "5997679097582981876126538929314854897856654620144767419232361193165432492135group"
+      }
+    ]
   }
 }
 ```
-with the success response.
+Again, we see the transaction (of type `Execution`) and its ID, which means the execution was sent out to the network sucesfully.
 
 After each execution, tendermint node may be left in an invalid state. If that's the case run:
 
@@ -141,7 +147,81 @@ After each execution, tendermint node may be left in an invalid state. If that's
 make reset
 ```
 
-to restore the initial state.
+to restore the initial state. Notice that this will delete the databases that store the programs and the records, so previous deployments and account records will be deleted.
+
+### Debugging the client/ABCI
+
+By default, the CLI will output no more data than a JSON response. To enable verbose output, you can pass the `-v` flag to see logs up to the level that you have set on the env var `RUST_LOG`. The same applies for the ABCI.
+
+### Setting the blockchain endpoint
+
+By default, the CLI client sends every transaction to `http://127.0.0.1:26657`, which is the local port for the ABCI application. In order to override this, you can set the env var `BLOCKCHAIN_URL` or alternatively, you can pass `-url {blockchain_url}` in the commands.
+
+### See available CLI parameters
+In order to see all different commands and parameters that the CLI can take, you can run `bin/aleo --help`.
+
+## Running tests
+
+In order to run tests, make sure the ABCI and the Tendermint Node are currently (`make abci` and `make node` respectively) running locally, and run `make test`. 
+
+## Working with records
+
+In order to work with records, there are some things to keep in mind. As an example, we can use the `aleo/token.aleo` program. Deploy the program by running `bin/aleo program deploy aleo/token.aleo` and then do:
+
+```shell
+program execute aleo/token.aleo mint 12u64 {address}
+```
+
+````
+{
+  "Execution": {
+    "id": "13a6e12f-c1be-46ce-b88e-9f3d74c7f9f5",
+    "transitions": [
+      {
+        "fee": 0,
+        "function": "mint",
+        "id": "as1cektpje7mvrpgx4hawwdgfdgtw3yssfka282mpxaka8wcwmmhuyq8r3tf8",
+        "inputs": [
+          {
+            "id": "1903280603122117322278162275809747610855764299760927153918643421395521073298field",
+            "type": "private",
+            "value": "ciphertext1qyqfajapluev4msjwzzptsymq4l0wl329krz6jqspmxz22leek7ljzsnq8nuh"
+          },
+          {
+            "id": "3522127154863327477692820168234451494875264297697436450178817817644445199141field",
+            "type": "private",
+            "value": "ciphertext1qgqfmm7w6xztayz66ua54f7se899gusalx7540tavay508gcxndsjq5us4ncksafshdl4kfcwdgana8sp6ttnaj27t7m4t4pkq7tpvw4qgz20wda"
+          }
+        ],
+        "outputs": [
+          {
+            "checksum": "662823924611211467835113438946492963566923769790927177001971226066013541277field",
+            "id": "7219462448732480752053359377653342974759175543229460809950854209290642964685field",
+            "type": "record",
+            "value": "record1qyqsqtve8kg9afk6vzva3cpar5jztamahh38l75v6fzjee0te72xdfs0qyqsp0yrkua473w430zkrdls9ndreg8ucg7swph8zref9hem6e7pmdg8qyqqvctdda6kuaprqqpqzqq78dw4y06ax8l0fs49txvf0n0azx7ue6guhld7c5ecxtxexujjzymnlltl8hac9cy0vr0d6xd6fc6gqhfn3znfa4vcz22jrtyqax2s2gkz2mv"
+          }
+        ],
+        "program": "token.aleo",
+        "proof": "proof1qqqqzqqqqqqqqqqq0t0lajnnm",
+        "tcm": "3029182936031307181714700392868610826830807174425109386666072696640639657186field",
+        "tpk": "3762006807277732897697753651971484341155898222134947549896413876819808587029group"
+      }
+    ]
+  }
+}
+````
+
+You can use your address from the account creation here. You can see the output contains a record, which you can use in further executions such as the function `transfer_amount` from the same aleo program by passing the value `record1qyqsqtve8kg9afk6vzva3cpar5jztamahh38l75v6fzjee0te72xdfs0qyqsp0yrkua473w430zkrdls9ndreg8ucg7swph8zref9hem6e7pmdg8qyqqvctdda6kuaprqqpqzqq78dw4y06ax8l0fs49txvf0n0azx7ue6guhld7c5ecxtxexujjzymnlltl8hac9cy0vr0d6xd6fc6gqhfn3znfa4vcz22jrtyqax2s2gkz2mv` as the parameter. 
+
+## Initialize validators
+
+In order to initialize the necessary files that would be required on a testnet, you can run:
+
+````
+make VALIDATORS=3 testnet
+````
+
+This will create subdirectories in `/mytestnet/` for each of the validators (defaults to 4 if it's not passed as a parameter). This means that there are files for the private validator keys, account info and genesis state. This way the nodes are able to translate a tendermint validator address to an aleo account, which in turn are used to generate reward records.
 
 ## Running multiple nodes on docker compose
 
@@ -163,7 +243,7 @@ make localnet-start
 
 Note that each node will require more than 2Gb to run so docker should be configured to use 10Gb or more in order to work with the default 4 nodes.
 
-To modify the configuartion you should edit `docker-compose.yml` file
+To modify the configuration you should edit `docker-compose.yml` file
 
 The configuration mounts some volumes in the `build/node{_}/` directories, and in case the tendermint nodes state needs to be reset, just run
 
