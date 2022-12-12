@@ -3,7 +3,7 @@ use assert_cmd::{
     Command,
 };
 use assert_fs::NamedTempFile;
-use lib::transaction::Transaction;
+
 use rand::Rng;
 use retry::{self, delay::Fixed};
 use serde::de::DeserializeOwned;
@@ -62,34 +62,8 @@ fn program_validations() {
     // deploy a program, save txid
     execute_client_command(Some(home_path), &["program", "deploy", &program_path]).unwrap();
 
-    // fail on trying to deploy same program with remote compilation
-    Command::cargo_bin("client")
-        .unwrap()
-        .env("ALEO_HOME", home_path)
-        .args(["program", "deploy", &program_path, "-c"])
-        .assert()
-        .success();
-
-    // fail on already deployed compiled locally
+    // fail on already deployed program
     execute_client_command(Some(home_path), &["program", "deploy", &program_path]).unwrap_err();
-
-    // deploy `hello.aleo` with remote compilation
-    let (_program_file, program_path) = load_program("hello");
-
-    Command::cargo_bin("client")
-        .unwrap()
-        .env("ALEO_HOME", home_path)
-        .args(["program", "deploy", &program_path, "-c"])
-        .assert()
-        .success();
-
-    // make sure remotely compiled program works by executing it
-    Command::cargo_bin("client")
-        .unwrap()
-        .env("ALEO_HOME", home_path)
-        .args(["program", "execute", &program_path, "hello", "1u32", "1u32"])
-        .assert()
-        .success();
 
     // fail on unknown function
     execute_program(home_path, &program_path, UNKNOWN_PROGRAM, &["1u32", "1u32"]).unwrap_err();
@@ -125,7 +99,7 @@ fn decrypt_records() {
 
     let (_acc_file, home_path, _) = &new_account();
 
-    // // should fail to decrypt records (different credentials)
+    // should fail to decrypt records (different credentials)
     let transaction = retry_command(Some(home_path), &[GET, transaction_id, "-d"]).unwrap();
 
     let decrypted_records = transaction
@@ -262,47 +236,6 @@ fn validate_credits() {
         .err()
         .unwrap();
     assert!(output.contains("is not satisfied on the given inputs"));
-}
-
-#[test]
-fn test_remote_compilation_race() {
-    // deploy two (slightly different) programs with the same ID  instantly and make sure the first one is the
-    // one that remains valid by failing an execution of the second program. this test assumes little to no
-    // delay (client-side) between the two deploys (relative to the time it takes to commit them in the blockchain)
-
-    let (_, home_path, _) = &new_account();
-    let (program_file, program_path) = load_program("hello");
-
-    Command::cargo_bin("client")
-        .unwrap()
-        .args(["program", "deploy", &program_path, "-c"])
-        .env("ALEO_HOME", home_path)
-        .assert()
-        .success();
-
-    let program_str = fs::read_to_string(program_file.path()).unwrap();
-    // modify the program slightly before sending it instantly for remote compilation
-    // (program ID remains the same)
-    let source = program_str.replace("add ", "sub ");
-    fs::write(&program_path, source).unwrap();
-
-    let deploy_result = Command::cargo_bin("client")
-        .unwrap()
-        .args(["program", "deploy", &program_path, "-c"])
-        .env("ALEO_HOME", home_path)
-        .assert()
-        .success();
-
-    Command::cargo_bin("client")
-        .unwrap()
-        .env("ALEO_HOME", home_path)
-        .args(["program", "execute", &program_path, "hello", "3u32", "1u32"])
-        .assert()
-        .failure();
-
-    let transaction: Transaction = parse_output(deploy_result);
-    // get execution tx, assert expected output
-    let _ = retry_command(Some(home_path), &["get", transaction.id()]);
 }
 
 #[test]

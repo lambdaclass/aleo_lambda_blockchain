@@ -7,19 +7,12 @@ use snarkvm::prelude::{Ciphertext, Record, Testnet3};
 use std::fs;
 use std::path::Path;
 
-// Until we settle on one of the alternatives depending on performance, we have 2 variants for deployment transactions:
-// Transaction::Deployment generates verifying keys offline and sends them to the network along with the program
-// Transaction::Source just sends the program after being validated, and keys are generated on-chain
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Transaction {
     Deployment {
         id: String,
         program: Box<vm::Program>,
         verifying_keys: vm::VerifyingKeyMap,
-    },
-    Source {
-        id: String,
-        program: Box<vm::Program>,
     },
     Execution {
         id: String,
@@ -67,26 +60,10 @@ impl Transaction {
         Ok(Self::Execution { id, transitions })
     }
 
-    // Used to generate a deployment without generating the verifying keys locally
-    pub fn from_source(path: &Path) -> Result<Self> {
-        let program_string = fs::read_to_string(path)?;
-
-        debug!("Deploying non-compiled program {}", program_string);
-
-        let program = vm::generate_program(&program_string)?;
-
-        let id = uuid::Uuid::new_v4().to_string();
-        Ok(Transaction::Source {
-            id,
-            program: Box::new(program),
-        })
-    }
-
     pub fn id(&self) -> &str {
         match self {
             Transaction::Deployment { id, .. } => id,
             Transaction::Execution { id, .. } => id,
-            Transaction::Source { id, .. } => id,
         }
     }
 
@@ -131,9 +108,6 @@ impl std::fmt::Display for Transaction {
         match self {
             Transaction::Deployment { id, program, .. } => {
                 write!(f, "Deployment({},{})", id, program.id())
-            }
-            Transaction::Source { id, program } => {
-                write!(f, "Source({},{})", id, program.id())
             }
             Transaction::Execution { id, transitions } => {
                 let transition = transitions.first().unwrap();

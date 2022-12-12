@@ -361,15 +361,6 @@ impl SnarkVMApp {
                     ))
                 }
             }
-            Transaction::Source { program, .. } => {
-                ensure!(
-                    !self.programs.exists(program.id()),
-                    format!("Program already exists: {}", program.id())
-                );
-
-                // validate that the program is parsed correctly
-                vm::generate_program(&program.to_string()).map(|_| ())
-            }
         };
 
         match result {
@@ -383,10 +374,6 @@ impl SnarkVMApp {
     fn collect_fees(&self, transaction: &Transaction) -> Result<()> {
         let fees = match transaction {
             Transaction::Deployment { .. } => {
-                // TODO deployment should have an optional fee transition
-                0
-            }
-            Transaction::Source { .. } => {
                 // TODO deployment should have an optional fee transition
                 0
             }
@@ -413,16 +400,6 @@ impl SnarkVMApp {
                 // it's not clear that we're interested in the store here, but it's required for that function
                 // note we could've use process.load_deployment instead but that one is private
                 Ok(())
-            }
-            Transaction::Source { program, .. } => {
-                let rng = &mut rand::thread_rng();
-                let program = vm::generate_program(&program.to_string())?;
-
-                self.programs.add(
-                    program.id(),
-                    &program,
-                    &vm::generate_verifying_keys(&program, rng)?,
-                )
             }
         }
     }

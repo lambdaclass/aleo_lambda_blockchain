@@ -57,15 +57,8 @@ impl Command {
                             .collect();
                     json!(&records)
                 }
-                Command::Program(Program::Deploy {
-                    path,
-                    compile_remotely,
-                }) => {
-                    let transaction = if compile_remotely {
-                        Transaction::from_source(&path)?
-                    } else {
-                        Transaction::deployment(&path)?
-                    };
+                Command::Program(Program::Deploy { path }) => {
+                    let transaction = Transaction::deployment(&path)?;
                     let transaction_serialized = bincode::serialize(&transaction).unwrap();
                     tendermint::broadcast(transaction_serialized, &url).await?;
                     json!(transaction)
@@ -202,9 +195,6 @@ pub enum Program {
         /// Path where the aleo program file resides.
         #[clap(value_parser)]
         path: PathBuf,
-        /// Compile remotely and send the synthesized keys along with the program.
-        #[clap(short, long, default_value_t = false)]
-        compile_remotely: bool,
     },
     /// Runs locally and sends an execution transaction to the Blockchain, returning the Transaction ID
     Execute {
