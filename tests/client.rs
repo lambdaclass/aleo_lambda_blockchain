@@ -13,10 +13,9 @@ use std::{collections::HashMap, fs};
 const HELLO_PROGRAM: &str = "hello";
 const UNKNOWN_PROGRAM: &str = "unknown";
 const TOKEN_PROGRAM: &str = "token";
-const MINT: &str = "mint";
-const GET: &str = "get";
-const TRANSFER: &str = "transfer_amount";
-const CONSUME: &str = "consume";
+const MINT_FUNCTION: &str = "mint";
+const TRANSFER_FUNCTION: &str = "transfer_amount";
+const CONSUME_FUNCTION: &str = "consume";
 
 const CURRENT_ACCOUNT: &str = "%account";
 
@@ -26,21 +25,20 @@ fn basic_program() {
 
     // deploy a program
     let (_program_file, program_path) = load_program(HELLO_PROGRAM);
-    let transaction =
-        execute_client_command(Some(home_path), &["program", "deploy", &program_path]).unwrap();
+    let transaction = client_command(home_path, &["program", "deploy", &program_path]).unwrap();
     let transaction_id = get_transaction_id(&transaction).unwrap();
 
     // get deployment tx, need to retry until it gets committed
-    retry_command(Some(home_path), &[GET, transaction_id]).unwrap();
+    retry_command(home_path, &["get", transaction_id]).unwrap();
 
     // execute the program, save txid
     let transaction =
-        execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32", "1u32"]).unwrap();
+        execute_program(home_path, &program_path, "hello", &["1u32", "1u32"]).unwrap();
 
     let transaction_id = get_transaction_id(&transaction).unwrap();
 
     // get execution tx, assert expected output
-    let transaction = retry_command(Some(home_path), &[GET, transaction_id]).unwrap();
+    let transaction = retry_command(home_path, &["get", transaction_id]).unwrap();
     let value = transaction
         .pointer("/Execution/transitions/0/outputs/0/value")
         .unwrap()
@@ -57,19 +55,27 @@ fn program_validations() {
     let (_program_file, program_path) = load_program(HELLO_PROGRAM);
 
     // fail on execute non deployed command
-    execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32", "1u32"]).unwrap_err();
+    let error =
+        execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32", "1u32"]).unwrap_err();
+    assert!(error.contains("Error executing transaction 1: Could not verify transaction"));
 
     // deploy a program, save txid
-    execute_client_command(Some(home_path), &["program", "deploy", &program_path]).unwrap();
+    client_command(home_path, &["program", "deploy", &program_path]).unwrap();
 
-    // fail on already deployed program
-    execute_client_command(Some(home_path), &["program", "deploy", &program_path]).unwrap_err();
+    // fail on already deployed compiled locally
+    let error = client_command(home_path, &["program", "deploy", &program_path]).unwrap_err();
+    assert!(error.contains(
+        "Error executing transaction 1: Could not verify transaction: Program already exists"
+    ));
 
     // fail on unknown function
-    execute_program(home_path, &program_path, UNKNOWN_PROGRAM, &["1u32", "1u32"]).unwrap_err();
+    let error =
+        execute_program(home_path, &program_path, UNKNOWN_PROGRAM, &["1u32", "1u32"]).unwrap_err();
+    assert!(error.contains("\\\"Function \\'unknown\\' does not exist."));
 
     // fail on missing parameter
-    execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32"]).unwrap_err();
+    let error = execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32"]).unwrap_err();
+    assert!(error.contains("expects 2 inputs"));
 }
 
 #[test]
@@ -78,19 +84,24 @@ fn decrypt_records() {
     let (_program_file, program_path) = load_program(TOKEN_PROGRAM);
 
     // deploy a program, save txid
-    execute_client_command(Some(home_path), &["program", "deploy", &program_path]).unwrap();
+    client_command(home_path, &["program", "deploy", &program_path]).unwrap();
 
     // get address
     let address = credentials.get("address").unwrap();
 
     // execute mint
-    let transaction =
-        execute_program(home_path, &program_path, MINT, &["1u64", CURRENT_ACCOUNT]).unwrap();
+    let transaction = execute_program(
+        home_path,
+        &program_path,
+        MINT_FUNCTION,
+        &["1u64", CURRENT_ACCOUNT],
+    )
+    .unwrap();
 
     let transaction_id = get_transaction_id(&transaction).unwrap();
 
     // test successful decryption of records (same credentials)
-    let transaction = retry_command(Some(home_path), &[GET, transaction_id, "-d"]).unwrap();
+    let transaction = retry_command(home_path, &["get", transaction_id, "-d"]).unwrap();
     let (owner, gates, amount) = get_decrypted_record(&transaction);
 
     assert_eq!(amount.to_string(), "1u64.private");
@@ -100,7 +111,7 @@ fn decrypt_records() {
     let (_acc_file, home_path, _) = &new_account();
 
     // should fail to decrypt records (different credentials)
-    let transaction = retry_command(Some(home_path), &[GET, transaction_id, "-d"]).unwrap();
+    let transaction = retry_command(home_path, &["get", transaction_id, "-d"]).unwrap();
 
     let decrypted_records = transaction
         .pointer("/decrypted_records")
@@ -121,16 +132,21 @@ fn token_transaction() {
     let (_program_file, program_path) = load_program("token");
 
     // Deploy the token program to the blockchain
-    execute_client_command(Some(alice_home), &["program", "deploy", &program_path]).unwrap();
+    client_command(alice_home, &["program", "deploy", &program_path]).unwrap();
 
     // Mint 10 tokens into an Alice Record
-    let transaction =
-        execute_program(alice_home, &program_path, MINT, &["10u64", CURRENT_ACCOUNT]).unwrap();
+    let transaction = execute_program(
+        alice_home,
+        &program_path,
+        MINT_FUNCTION,
+        &["10u64", CURRENT_ACCOUNT],
+    )
+    .unwrap();
 
     let transaction_id = get_transaction_id(&transaction).unwrap();
 
     // Get and decrypt te mint output record
-    let transaction = retry_command(Some(alice_home), &[GET, transaction_id]).unwrap();
+    let transaction = retry_command(alice_home, &["get", transaction_id]).unwrap();
 
     let record = get_encrypted_record(&transaction);
 
@@ -138,15 +154,14 @@ fn token_transaction() {
     let transaction = execute_program(
         alice_home,
         &program_path,
-        TRANSFER,
+        TRANSFER_FUNCTION,
         &[record, bob_credentials.get("address").unwrap(), "5u64"],
     )
     .unwrap();
     let transfer_transaction_id = get_transaction_id(&transaction).unwrap();
 
     // Get, decrypt and assert correctness of Alice output record: Should have 5u64.private in the amount variable
-    let transaction =
-        retry_command(Some(alice_home), &[GET, transfer_transaction_id, "-d"]).unwrap();
+    let transaction = retry_command(alice_home, &["get", transfer_transaction_id, "-d"]).unwrap();
     let (owner, _gates, amount) = get_decrypted_record(&transaction);
 
     assert_eq!(
@@ -156,7 +171,7 @@ fn token_transaction() {
     assert_eq!(amount, "5u64.private");
 
     // Get, decrypt and assert correctness of Bob output record: Should have 5u64.private in the amount variable
-    let transaction = retry_command(Some(bob_home), &[GET, transfer_transaction_id, "-d"]).unwrap();
+    let transaction = retry_command(bob_home, &["get", transfer_transaction_id, "-d"]).unwrap();
     let (owner, _gates, amount) = get_decrypted_record(&transaction);
 
     assert_eq!(
@@ -175,11 +190,16 @@ fn consume_records() {
     let (_program_file, program_path) = load_program("records");
 
     // deploy "records" program
-    execute_client_command(Some(home_path), &["program", "deploy", &program_path]).unwrap();
+    client_command(home_path, &["program", "deploy", &program_path]).unwrap();
 
     // execute mint
-    let transaction =
-        execute_program(home_path, &program_path, MINT, &["10u64", CURRENT_ACCOUNT]).unwrap();
+    let transaction = execute_program(
+        home_path,
+        &program_path,
+        MINT_FUNCTION,
+        &["10u64", CURRENT_ACCOUNT],
+    )
+    .unwrap();
 
     let transaction_id = transaction
         .pointer("/Execution/id")
@@ -188,14 +208,15 @@ fn consume_records() {
         .unwrap();
 
     // Get the mint record
-    let transaction = retry_command(Some(home_path), &[GET, transaction_id]).unwrap();
+    let transaction = retry_command(home_path, &["get", transaction_id]).unwrap();
     let record = get_encrypted_record(&transaction);
 
     // execute consume with output record
-    execute_program(home_path, &program_path, CONSUME, &[record]).unwrap();
+    execute_program(home_path, &program_path, CONSUME_FUNCTION, &[record]).unwrap();
 
     // execute consume with same output record, execution fails, no double spend
-    execute_program(home_path, &program_path, CONSUME, &[record]).unwrap_err();
+    let error = execute_program(home_path, &program_path, CONSUME_FUNCTION, &[record]).unwrap_err();
+    assert!(error.contains("is unknown or already spent"));
 
     // create a fake record
     let (_new_acc_file, _new_home_path, credentials) = &new_account();
@@ -209,7 +230,9 @@ fn consume_records() {
     );
 
     // execute with made output record, execution fails, no use unknown record
-    execute_program(home_path, &program_path, CONSUME, &[&record]).unwrap_err();
+    let error =
+        execute_program(home_path, &program_path, CONSUME_FUNCTION, &[&record]).unwrap_err();
+    assert!(error.contains("Invalid value"));
 }
 
 #[test]
@@ -219,9 +242,14 @@ fn validate_credits() {
     let credits_path = "aleo/credits.aleo";
 
     // test that executing the mint function fails
-    let output = execute_program(home_path, credits_path, MINT, &["%account", "100u64"])
-        .err()
-        .unwrap();
+    let output = execute_program(
+        home_path,
+        credits_path,
+        MINT_FUNCTION,
+        &["%account", "100u64"],
+    )
+    .err()
+    .unwrap();
     assert!(output.contains("Coinbase functions cannot be called"));
 
     // test that executing the genesis function fails
@@ -231,19 +259,24 @@ fn validate_credits() {
     assert!(output.contains("Coinbase functions cannot be called"));
 
     let (_program_file, program_path) = load_program("credits");
-    execute_client_command(Some(home_path), &["program", "deploy", &program_path]).unwrap();
-    let output = execute_program(home_path, &program_path, MINT, &["%account", "100u64"])
-        .err()
-        .unwrap();
+    client_command(home_path, &["program", "deploy", &program_path]).unwrap();
+    let output = execute_program(
+        home_path,
+        &program_path,
+        MINT_FUNCTION,
+        &["%account", "100u64"],
+    )
+    .err()
+    .unwrap();
     assert!(output.contains("is not satisfied on the given inputs"));
 }
 
 #[test]
 fn transfer_credits() {
-    let validator_home = get_address_with_credits();
+    let validator_home = validator_account_path();
 
     // assuming the first record has more than 10 credits
-    let record = execute_client_command(Some(&validator_home), &["account", "records"])
+    let record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
         .unwrap()
@@ -253,8 +286,8 @@ fn transfer_credits() {
 
     let (_tempfile, receiver_home, credentials) = &new_account();
 
-    execute_client_command(
-        Some(&validator_home),
+    client_command(
+        &validator_home,
         &[
             "credits",
             "transfer",
@@ -268,7 +301,7 @@ fn transfer_credits() {
     // check the the account received the balance
     // (validator balance can't be checked because it could receive a reward while the test is running)
     retry::retry(Fixed::from_millis(1000).take(10), || {
-        let receiver_balance = get_balance(Some(receiver_home));
+        let receiver_balance = get_balance(receiver_home);
         if receiver_balance == 10 {
             Ok(())
         } else {
@@ -283,16 +316,12 @@ fn transfer_credits() {
 /// Retries iteratively to get a transaction until something returns
 /// If `home_path` is Some(val), it uses the val as the credentials file in order to get the required credentials to attempt decryption
 fn retry_command(
-    home_path: Option<&str>,
+    home_path: &str,
     args: &[&str],
 ) -> Result<serde_json::Value, retry::Error<AssertError>> {
     retry::retry(Fixed::from_millis(1000).take(10), || {
         let mut command = &mut Command::cargo_bin("client").unwrap();
-
-        if let Some(path) = home_path {
-            command = command.env("ALEO_HOME", path);
-        }
-
+        command = command.env("ALEO_HOME", home_path);
         command.args(args).assert().try_success()
     })
     .map(parse_output)
@@ -325,7 +354,7 @@ fn new_account() -> (NamedTempFile, String, HashMap<String, String>) {
         .to_string_lossy()
         .to_string();
 
-    let credentials = execute_client_command(Some(&aleo_path), &["account", "new"]).unwrap();
+    let credentials = client_command(&aleo_path, &["account", "new"]).unwrap();
 
     let credentials: HashMap<String, String> =
         serde_json::from_value(credentials.pointer("/account").unwrap().clone()).unwrap();
@@ -400,8 +429,8 @@ fn get_encrypted_record(transaction: &serde_json::Value) -> &str {
         .unwrap()
 }
 
-fn get_balance(path: Option<&str>) -> u64 {
-    execute_client_command(path, &["account", "balance"])
+fn get_balance(path: &str) -> u64 {
+    client_command(path, &["account", "balance"])
         .unwrap()
         .pointer("/balance")
         .unwrap()
@@ -416,18 +445,13 @@ fn execute_program(
     inputs: &[&str],
 ) -> Result<serde_json::Value, String> {
     let args = [&["program", "execute", program_path, fun], inputs].concat();
-    execute_client_command(Some(user_path), &args)
+    client_command(user_path, &args)
 }
 
-fn execute_client_command(
-    user_path: Option<&str>,
-    args: &[&str],
-) -> Result<serde_json::Value, String> {
+fn client_command(user_path: &str, args: &[&str]) -> Result<serde_json::Value, String> {
     let mut command = &mut Command::cargo_bin("client").unwrap();
 
-    if let Some(path) = user_path {
-        command = command.env("ALEO_HOME", path);
-    }
+    command = command.env("ALEO_HOME", user_path);
 
     command
         .args(args)
@@ -437,7 +461,7 @@ fn execute_client_command(
         .map_err(|e| e.to_string())
 }
 
-fn get_address_with_credits() -> String {
+fn validator_account_path() -> String {
     dirs::home_dir()
         .unwrap()
         .join(".tendermint")
