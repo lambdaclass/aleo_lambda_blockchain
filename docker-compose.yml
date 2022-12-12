@@ -10,9 +10,9 @@ services:
       - ID=0
       - LOG=${LOG:-tendermint.log}
     volumes:
-      - ./build:/tendermint:Z
+      - ./testnet:/tendermint:Z
     depends_on: ["abci0"]
-    command: node --proxy_app=tcp://abci0:26658
+    command: node --proxy_app=tcp://abci0:26658 --log_level=error --consensus.create_empty_blocks_interval="10s"
     networks:
       localnet:
         ipv4_address: 192.167.10.2
@@ -26,9 +26,9 @@ services:
       - ID=1
       - LOG=${LOG:-tendermint.log}
     volumes:
-      - ./build:/tendermint:Z
+      - ./testnet:/tendermint:Z
     depends_on: ["abci1"]
-    command: node --proxy_app=tcp://abci1:26658
+    command: node --proxy_app=tcp://abci1:26658 --log_level=error --consensus.create_empty_blocks_interval="10s"
     networks:
       localnet:
         ipv4_address: 192.167.10.3
@@ -40,11 +40,11 @@ services:
       - ID=2
       - LOG=${LOG:-tendermint.log}
     ports:
-      - "26661-26662:26656-26657"
+      - "26662-26663:26656-26657"
     volumes:
-      - ./build:/tendermint:Z
+      - ./testnet:/tendermint:Z
     depends_on: ["abci2"]
-    command: node --proxy_app=tcp://abci2:26658
+    command: node --proxy_app=tcp://abci2:26658 --log_level=error --consensus.create_empty_blocks_interval="10s"
     networks:
       localnet:
         ipv4_address: 192.167.10.4
@@ -56,11 +56,11 @@ services:
       - ID=3
       - LOG=${LOG:-tendermint.log}
     ports:
-      - "26663-26664:26656-26657"
+      - "26665-26666:26656-26657"
     volumes:
-      - ./build:/tendermint:Z
+      - ./testnet:/tendermint:Z
     depends_on: ["abci3"]
-    command: node --proxy_app=tcp://abci3:26658
+    command: node --proxy_app=tcp://abci3:26658 --log_level=error --consensus.create_empty_blocks_interval="10s"
     networks:
       localnet:
         ipv4_address: 192.167.10.5
@@ -71,8 +71,9 @@ services:
     expose:
       - "26658"
     volumes:
-      - ./build/node0/root:/root:Z
-    command: "/target/release/snarkvm_abci --host 192.167.10.6"
+      - ./testnet/node0/root:/root:Z
+      - ~/.aleo/resources:/root/.aleo/resources:Z
+    command: "/target/release/snarkvm_abci --host 192.167.10.6 --verbose"
     networks:
       localnet:
         ipv4_address: 192.167.10.6
@@ -83,7 +84,8 @@ services:
     expose:
       - "26658"
     volumes:
-      - ./build/node1/root:/root:Z
+      - ./testnet/node1/root:/root:Z
+      - ~/.aleo/resources:/root/.aleo/resources:Z
     command: "/target/release/snarkvm_abci --host 192.167.10.7"
     networks:
       localnet:
@@ -95,7 +97,8 @@ services:
     expose:
       - "26658"
     volumes:
-      - ./build/node2/root:/root:Z
+      - ./testnet/node2/root:/root:Z
+      - ~/.aleo/resources:/root/.aleo/resources:Z
     command: "/target/release/snarkvm_abci --host 192.167.10.8"
     networks:
       localnet:
@@ -107,7 +110,8 @@ services:
     expose:
       - "26658"
     volumes:
-      - ./build/node3/root:/root:Z
+      - ./testnet/node3/root:/root:Z
+      - ~/.aleo/resources:/root/.aleo/resources:Z
     command: "/target/release/snarkvm_abci --host 192.167.10.9"
     networks:
       localnet:

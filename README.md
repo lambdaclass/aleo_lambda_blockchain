@@ -162,7 +162,7 @@ In order to see all different commands and parameters that the CLI can take, you
 
 ## Running tests
 
-In order to run tests, make sure the ABCI and the Tendermint Node are currently (`make abci` and `make node` respectively) running locally, and run `make test`. 
+In order to run tests, make sure the ABCI and the Tendermint Node are currently (`make abci` and `make node` respectively) running locally, and run `make test`.
 
 ## Working with records
 
@@ -211,7 +211,7 @@ program execute aleo/token.aleo mint 12u64 {address}
 }
 ````
 
-You can use your address from the account creation here. You can see the output contains a record, which you can use in further executions such as the function `transfer_amount` from the same aleo program by passing the value `record1qyqsqtve8kg9afk6vzva3cpar5jztamahh38l75v6fzjee0te72xdfs0qyqsp0yrkua473w430zkrdls9ndreg8ucg7swph8zref9hem6e7pmdg8qyqqvctdda6kuaprqqpqzqq78dw4y06ax8l0fs49txvf0n0azx7ue6guhld7c5ecxtxexujjzymnlltl8hac9cy0vr0d6xd6fc6gqhfn3znfa4vcz22jrtyqax2s2gkz2mv` as the parameter. 
+You can use your address from the account creation here. You can see the output contains a record, which you can use in further executions such as the function `transfer_amount` from the same aleo program by passing the value `record1qyqsqtve8kg9afk6vzva3cpar5jztamahh38l75v6fzjee0te72xdfs0qyqsp0yrkua473w430zkrdls9ndreg8ucg7swph8zref9hem6e7pmdg8qyqqvctdda6kuaprqqpqzqq78dw4y06ax8l0fs49txvf0n0azx7ue6guhld7c5ecxtxexujjzymnlltl8hac9cy0vr0d6xd6fc6gqhfn3znfa4vcz22jrtyqax2s2gkz2mv` as the parameter.
 
 ## Initialize validators
 
@@ -225,9 +225,7 @@ This will create subdirectories in `/mytestnet/` for each of the validators (def
 
 ## Running multiple nodes on docker compose
 
-Follow [Tendermint Core instructions](https://docs.tendermint.com/v0.34/networks/docker-compose.html) to build the tendermint binary and the tendermint/localnode image
-
-Copy the tendermint binary into a `build` directory in the root of this project.
+This requires having docker (with docker-compose) installed.
 
 Then build the `snarkvm_abci` image:
 
@@ -245,13 +243,21 @@ Note that each node will require more than 2Gb to run so docker should be config
 
 To modify the configuration you should edit `docker-compose.yml` file
 
-The configuration mounts some volumes in the `build/node{_}/` directories, and in case the tendermint nodes state needs to be reset, just run
+The configuration mounts some volumes in the `testnet/node{_}/` directories, and in case the tendermint nodes state needs to be reset, just run:
 
 ```
 make localnet-reset
 ```
 
-or delete all the `node{_}` dirs to remove local `snarkvm_abci` data (it will require to download all the parameters on next run)
+or delete all the `node{_}` dirs to remove local `snarkvm_abci` data (it will require to download all the parameters on next run).
+
+You will find an `account.json` file in each `testnet/node{_}/` directory, with the aleo credentials of the validators (usable to run commands with the credits of the validators). On a MacOS docker deploy, each of the 4 testnet nodes will be exposed on ports 26657, 26660, 26663, 26666 of localhost.
+
+Thus, you can interact with the network from the host like this:
+
+```
+ALEO_HOME=testnet/node1/ bin/aleo --url http://127.0.0.1:26657 account balance
+```
 
 ## Design
 

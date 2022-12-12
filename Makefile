@@ -1,4 +1,4 @@
-.PHONY: tendermint reset abci build cli genesis tendermint_config testnet
+.PHONY: tendermint reset abci build cli genesis tendermint_config testnet tendermint_install
 
 OS := $(shell uname | tr '[:upper:]' '[:lower:]')
 
@@ -14,12 +14,16 @@ TENDERMINT_HOME=~/.tendermint/
 cli:
 	mkdir -p bin && cargo build --release && cp target/release/client bin/aleo
 
-# Installs tendermint on linux or mac.
+# Installs tendermint for current OS and puts it in bin/
 bin/tendermint:
+	make tendermint_install
+	mv tendermint-install/tendermint bin/ && rm -rf tendermint-install
+
+# Internal phony target to install tendermint for an arbitrary OS
+tendermint_install:
 	mkdir -p tendermint-install bin && cd tendermint-install &&\
 	wget https://github.com/tendermint/tendermint/releases/download/v0.34.22/tendermint_0.34.22_$(OS)_$(ARCH).tar.gz &&\
-	tar -xzvf tendermint_0.34.22_$(OS)_$(ARCH).tar.gz &&\
-	cd .. && mv tendermint-install/tendermint bin/ && rm -rf tendermint-install
+	tar -xzvf tendermint_0.34.22_$(OS)_$(ARCH).tar.gz
 
 # initialize tendermint and write a genesis file for a local testnet.
 genesis: bin/tendermint cli
@@ -35,16 +39,19 @@ node: genesis tendermint_config
 tendermint_config:
 	sed -i.bak 's/max_body_bytes = 1000000/max_body_bytes = 12000000/g' $(TENDERMINT_HOME)/config/config.toml
 	sed -i.bak 's/max_tx_bytes = 1048576/max_tx_bytes = 10485770/g' $(TENDERMINT_HOME)/config/config.toml
+	sed -i.bak 's#laddr = "tcp://127.0.0.1:26657"#laddr = "tcp://0.0.0.0:26657"#g' $(TENDERMINT_HOME)/config/config.toml
 
 # Initialize the tendermint configuration for a testnet of the given amount of validators
 testnet: VALIDATORS:=4
+testnet: ADDRESS:=192.167.10.2
 testnet: bin/tendermint cli
-	bin/tendermint testnet --v $(VALIDATORS)
-	for node in mytestnet/*/ ; do \
+	rm -rf testnet/
+	bin/tendermint testnet --v $(VALIDATORS) --o ./testnet --starting-ip-address $(ADDRESS)
+	for node in testnet/*/ ; do \
 	  ALEO_HOME=$$node bin/aleo account new ; \
           make tendermint_config TENDERMINT_HOME=$$node ; \
 	done
-	cargo run --bin genesis --release -- mytestnet/*
+	cargo run --bin genesis --release -- testnet/*
 
 # remove the blockchain data
 reset: bin/tendermint
@@ -66,8 +73,9 @@ localnet-build-abci:
 .PHONY: localnet-build-abci
 
 # Run a 4-node testnet locally
-localnet-start: localnet-stop
-	@if ! [ -f build/node0/config/genesis.json ]; then docker run --rm -v $(CURDIR)/build:/tendermint:Z tendermint/localnode testnet --config /etc/tendermint/config-template.toml --o . --starting-ip-address 192.167.10.2; fi
+localnet-start: localnet-stop testnet
+	make tendermint_install OS=linux ARCH=amd64
+	mv tendermint-install/tendermint testnet/ && rm -rf tendermint-install
 	docker-compose up
 .PHONY: localnet-start
 
@@ -78,6 +86,5 @@ localnet-stop:
 
 # Reset the testnet data
 localnet-reset:
-	rm -Rf build/node?/config
-	rm -Rf build/node?/data
+	rm -Rf testnet
 .PHONY: localnet-reset

@@ -14,4 +14,4 @@ bin/
 .db_test
 *.db
 abci.*
-mytestnet/
+testnet/
