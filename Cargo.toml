@@ -21,12 +21,12 @@ name =  "client"
 
 [[bin]]
 name = "genesis"
-path = "src/genesis.rs"
+path = "src/blockchain/genesis.rs"
 test = false
 
 [[bin]]
 name = "snarkvm_abci"
-path = "src/snarkvm_abci/main.rs"
+path = "src/blockchain/main.rs"
 
 [dependencies]
 anyhow = "1.0.66"

@@ -6,8 +6,8 @@ MVP for an aleo blockchain. The current implementation uses a thin wrapper aroun
 
 * [aleo/](./aleo): example aleo instruction programs
 * [src/client/](./src/client/): CLI program to interact with the VM and the blockchain (e.g. create an account, deploy and execute programs)
-* [src/snarkvm_abci/](./src/snarkvm_abci): Implements the [Application Blockchain Interface](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview) (ABCI) to connect the aleo specific logic (e.g. program proof verification) to the Tendermint Core infrastructure.
-* [src/genesis.rs](./src/genesis.rs): Implements a helper program that generates JSON files that represent the genesis state for the ABCI app (which Tendermint requires).
+* [src/blockchain/](./src/blockchain/): Implements the [Application Blockchain Interface](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview) (ABCI) to connect the aleo specific logic (e.g. program proof verification) to the Tendermint Core infrastructure.
+* [src/blockchain/genesis.rs](./src/blockchain/genesis.rs): Implements a helper program that generates JSON files that represent the genesis state for the ABCI app (which Tendermint requires).
 * [src/lib/](./src/lib/): Shared library used by the CLI and the ABCI.
 
 
