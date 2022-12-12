@@ -326,17 +326,19 @@ impl SnarkVMApp {
     }
 
     fn validate_transaction(&self, transaction: &Transaction) -> Result<()> {
-        let rng = &mut rand::thread_rng();
-
         let result = match transaction {
-            Transaction::Deployment { ref deployment, .. } => {
+            Transaction::Deployment {
+                ref program,
+                verifying_keys,
+                ..
+            } => {
                 ensure!(
-                    !self.programs.exists(deployment.program_id()),
-                    "Program already exists"
+                    !self.programs.exists(program.id()),
+                    format!("Program already exists: {}", program.id())
                 );
 
                 // verify deployment is correct and keys are valid
-                vm::verify_deployment(deployment, rng)
+                vm::verify_deployment(program, verifying_keys.clone())
             }
             Transaction::Execution {
                 ref transitions, ..
@@ -362,7 +364,7 @@ impl SnarkVMApp {
             Transaction::Source { program, .. } => {
                 ensure!(
                     !self.programs.exists(program.id()),
-                    "Program already exists"
+                    format!("Program already exists: {}", program.id())
                 );
 
                 // validate that the program is parsed correctly
@@ -401,14 +403,11 @@ impl SnarkVMApp {
     /// example adding the programs to the program store.
     fn store_program(&self, transaction: &Transaction) -> Result<()> {
         match transaction {
-            Transaction::Deployment { deployment, .. } => {
-                let verifying_keys = vm::get_verifying_key_map(deployment);
-                self.programs.add(
-                    deployment.program_id(),
-                    deployment.program(),
-                    &verifying_keys,
-                )
-            }
+            Transaction::Deployment {
+                program,
+                verifying_keys,
+                ..
+            } => self.programs.add(program.id(), program, verifying_keys),
             Transaction::Execution { .. } => {
                 // we run finalize to save the program in the process for later execute verification
                 // it's not clear that we're interested in the store here, but it's required for that function
@@ -417,11 +416,13 @@ impl SnarkVMApp {
             }
             Transaction::Source { program, .. } => {
                 let rng = &mut rand::thread_rng();
-                let compiled_program = vm::generate_deployment(&program.to_string(), rng)?;
+                let program = vm::generate_program(&program.to_string())?;
 
-                let verifying_keys = vm::get_verifying_key_map(&compiled_program);
-
-                self.programs.add(program.id(), program, &verifying_keys)
+                self.programs.add(
+                    program.id(),
+                    &program,
+                    &vm::generate_verifying_keys(&program, rng)?,
+                )
             }
         }
     }

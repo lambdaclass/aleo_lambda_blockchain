@@ -1,7 +1,3 @@
-/// Library for interfacing with the VM, and generating Transactions
-///
-use std::{str::FromStr, sync::Arc};
-
 use anyhow::{anyhow, bail, ensure, Result};
 use log::debug;
 use parking_lot::{lock_api::RwLock, RawRwLock};
@@ -12,14 +8,14 @@ use snarkvm::{
     circuit::{AleoV0, IndexMap},
     console::types::string::Integer,
     prelude::{
-        Balance, CallStack, Environment, Literal, Network, Owner, Plaintext, Testnet3, ToField,
-        Uniform, I64,
+        Balance, CallStack, Environment, Itertools, Literal, Network, One, Owner, Plaintext,
+        Testnet3, ToField, Uniform, I64,
     },
 };
-
-use snarkvm::prelude::One;
+/// Library for interfacing with the VM, and generating Transactions
+///
+use std::{str::FromStr, sync::Arc};
 mod stack;
-
 pub type Address = snarkvm::prelude::Address<Testnet3>;
 pub type Identifier = snarkvm::prelude::Identifier<Testnet3>;
 pub type Value = snarkvm::prelude::Value<Testnet3>;
@@ -37,14 +33,42 @@ pub type ProgramID = snarkvm::prelude::ProgramID<Testnet3>;
 pub type VerifyingKey = snarkvm::prelude::VerifyingKey<Testnet3>;
 pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Transition = snarkvm::prelude::Transition<Testnet3>;
-
 pub type VerifyingKeyMap = IndexMap<Identifier, VerifyingKey>;
 
-pub fn verify_deployment(deployment: &Deployment, rng: &mut ThreadRng) -> Result<()> {
-    // Ensure the program is well-formed, by computing the stack.
-    let stack = stack::new_init(deployment.program())?;
+// Basic deployent validations
+pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> Result<()> {
+    // Ensure the deployment contains verifying keys.
+    let program_id = program.id();
+    ensure!(
+        !verifying_keys.is_empty(),
+        "No verifying keys present in the deployment for program '{program_id}'"
+    );
 
-    stack.verify_deployment::<AleoV0, _>(deployment, rng)
+    // Ensure the number of verifying keys matches the number of program functions.
+    if verifying_keys.len() != program.functions().len() {
+        bail!("The number of verifying keys does not match the number of program functions");
+    }
+
+    // Ensure the program functions are in the same order as the verifying keys.
+    for ((function_name, function), candidate_name) in
+        program.functions().iter().zip_eq(verifying_keys.keys())
+    {
+        // Ensure the function name is correct.
+        if function_name != function.name() {
+            bail!(
+                "The function key is '{function_name}', but the function name is '{}'",
+                function.name()
+            )
+        }
+        // Ensure the function name with the verifying key is correct.
+        if candidate_name != function.name() {
+            bail!(
+                "The verifier key is '{candidate_name}', but the function name is '{}'",
+                function.name()
+            )
+        }
+    }
+    Ok(())
 }
 
 pub fn verify_execution(
@@ -153,19 +177,23 @@ pub fn verify_execution(
 }
 
 // these struct-level functions should probably not be in the Vm level
-pub fn generate_deployment(program_string: &str, rng: &mut ThreadRng) -> Result<Deployment> {
-    let program = snarkvm::prelude::Program::from_str(program_string).unwrap();
-
+pub fn generate_verifying_keys(program: &Program, rng: &mut ThreadRng) -> Result<VerifyingKeyMap> {
     // NOTE: we're skipping the part of imported programs
     // https://github.com/Entropy1729/snarkVM/blob/2c4e282df46ed71c809fd4b49738fd78562354ac/vm/package/deploy.rs#L149
 
-    let stack = stack::new_init(&program)?;
-    // Return the deployment.
-    stack.deploy::<AleoV0, _>(rng)
+    let stack = stack::new_init(program)?;
+
+    stack.deploy::<AleoV0, _>(rng).map(|deploy| {
+        deploy
+            .verifying_keys()
+            .iter()
+            .map(|(id, vk)| (*id, vk.0.clone()))
+            .collect()
+    })
 }
 
 // Generates a program deployment for source transactions
-pub fn generate_program(program_string: &str) -> Result<snarkvm::prelude::Program<Testnet3>> {
+pub fn generate_program(program_string: &str) -> Result<Program> {
     // Verify program is valid by parsing it and returning it
     Program::from_str(program_string)
 }
@@ -177,7 +205,7 @@ pub fn generate_execution(
     private_key: &PrivateKey,
     rng: &mut ThreadRng,
 ) -> Result<Vec<Transition>> {
-    let program: Program = snarkvm::prelude::Program::from_str(program_string).unwrap();
+    let program: Program = Program::from_str(program_string)?;
 
     // we check this on the verify side (which will run in the blockchain)
     // repeating here just to fail early
@@ -233,14 +261,6 @@ fn execute(
     )?;
     let execution = execution.read().clone();
     Ok(execution.into_transitions().collect())
-}
-
-pub fn get_verifying_key_map(deployment: &Deployment) -> IndexMap<Identifier, VerifyingKey> {
-    deployment
-        .verifying_keys()
-        .iter()
-        .map(|(id, vk)| (*id, vk.0.clone()))
-        .collect()
 }
 
 /// Generate a credits record of the given amount for the given owner,

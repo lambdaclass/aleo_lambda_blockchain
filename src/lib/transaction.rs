@@ -14,7 +14,8 @@ use std::path::Path;
 pub enum Transaction {
     Deployment {
         id: String,
-        deployment: Box<vm::Deployment>,
+        program: Box<vm::Program>,
+        verifying_keys: vm::VerifyingKeyMap,
     },
     Source {
         id: String,
@@ -29,14 +30,18 @@ pub enum Transaction {
 impl Transaction {
     // Used to generate deployment of a new program in path
     pub fn deployment(path: &Path) -> Result<Self> {
-        let program_string = fs::read_to_string(path).unwrap();
+        let program_string = fs::read_to_string(path)?;
         let mut rng = rand::thread_rng();
         debug!("Deploying program {}", program_string);
-        let deployment = vm::generate_deployment(&program_string, &mut rng)?;
+        let program = vm::generate_program(&program_string)?;
+        let verifying_keys = vm::generate_verifying_keys(&program, &mut rng)?;
+        // using a uuid for txid, just to skip having to use an additional fee record which now is necessary to run
+        // Transaction::from_deployment
         let id = uuid::Uuid::new_v4().to_string();
-        Ok(Self::Deployment {
+        Ok(Transaction::Deployment {
             id,
-            deployment: Box::new(deployment),
+            program: Box::new(program),
+            verifying_keys,
         })
     }
 
@@ -50,7 +55,7 @@ impl Transaction {
         let rng = &mut rand::thread_rng();
 
         let transitions = if let Some(path) = path {
-            let program_string = fs::read_to_string(path).unwrap();
+            let program_string = fs::read_to_string(path)?;
 
             vm::generate_execution(&program_string, function_name, inputs, private_key, rng)?
         } else {
@@ -64,7 +69,7 @@ impl Transaction {
 
     // Used to generate a deployment without generating the verifying keys locally
     pub fn from_source(path: &Path) -> Result<Self> {
-        let program_string = fs::read_to_string(path).unwrap();
+        let program_string = fs::read_to_string(path)?;
 
         debug!("Deploying non-compiled program {}", program_string);
 
@@ -124,8 +129,8 @@ impl Transaction {
 impl std::fmt::Display for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Transaction::Deployment { id, deployment } => {
-                write!(f, "Deployment({},{})", id, deployment.program_id())
+            Transaction::Deployment { id, program, .. } => {
+                write!(f, "Deployment({},{})", id, program.id())
             }
             Transaction::Source { id, program } => {
                 write!(f, "Source({},{})", id, program.id())

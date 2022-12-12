@@ -148,7 +148,6 @@ impl ProgramStore {
 mod tests {
     use lib::vm::{self, Program};
     use rand::thread_rng;
-    use snarkvm::prelude::Testnet3;
 
     use super::*;
     use std::{fs, str::FromStr};
@@ -182,7 +181,7 @@ mod tests {
         assert!(get_program.unwrap().is_none());
 
         let storage_attempt = store_program(&store, "/aleo/hello.aleo");
-        assert!(storage_attempt.is_ok() && store.exists(storage_attempt.unwrap().program_id()));
+        assert!(storage_attempt.is_ok() && store.exists(storage_attempt.unwrap().id()));
 
         // FIXME patching rocksdb weird behavior
         std::mem::forget(store);
@@ -202,24 +201,19 @@ mod tests {
         assert!(store.exists(program.id()));
     }
 
-    fn store_program(
-        program_store: &ProgramStore,
-        path: &str,
-    ) -> Result<snarkvm::prelude::Deployment<Testnet3>> {
+    fn store_program(program_store: &ProgramStore, path: &str) -> Result<vm::Program> {
         let mut rng = thread_rng();
         let program_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
 
         let program_string = fs::read_to_string(program_path).unwrap();
-        let deployment = vm::generate_deployment(&program_string, &mut rng).unwrap();
-
-        let verifying_keys = vm::get_verifying_key_map(&deployment);
+        let program = vm::generate_program(&program_string)?;
 
         program_store.add(
-            deployment.program_id(),
-            deployment.program(),
-            &verifying_keys,
+            program.id(),
+            &program,
+            &vm::generate_verifying_keys(&program, &mut rng)?,
         )?;
 
-        Ok(deployment)
+        Ok(program)
     }
 }

@@ -59,7 +59,7 @@ abci:
 
 # run tests on release mode to ensure there is no extra printing to stdout
 test:
-	cargo test --release -- --nocapture
+	cargo test --release -- --nocapture --test-threads=2
 
 localnet-build-abci:
 	docker build -t snarkvm_abci .
