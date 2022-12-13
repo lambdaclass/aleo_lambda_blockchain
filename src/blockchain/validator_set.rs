@@ -170,8 +170,6 @@ impl ValidatorSet {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
-
     use super::*;
 
     #[ctor::dtor]
@@ -363,7 +361,7 @@ mod tests {
             .filter(|(_, record)| record.is_owner(&owner.1, &owner.0))
             .fold(0, |acc, (_, record)| {
                 let decrypted = record.decrypt(&owner.0).unwrap();
-                acc + *decrypted.gates().deref().deref()
+                acc + vm::gates(&decrypted)
             })
     }
 }

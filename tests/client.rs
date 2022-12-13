@@ -300,15 +300,127 @@ fn transfer_credits() {
 
     // check the the account received the balance
     // (validator balance can't be checked because it could receive a reward while the test is running)
-    retry::retry(Fixed::from_millis(1000).take(10), || {
-        let receiver_balance = get_balance(receiver_home);
-        if receiver_balance == 10 {
-            Ok(())
-        } else {
-            Err(())
-        }
-    })
+    assert_balance(receiver_home, 10).unwrap();
+}
+
+#[test]
+fn transaction_fees() {
+    // create a test account
+    let (_tempfile, receiver_home, credentials) = &new_account();
+
+    // try to run a deployment with a fee but no credits available, should fail
+    let (_program_file, program_path) = load_program(HELLO_PROGRAM);
+    let output = client_command(
+        receiver_home,
+        &["program", "deploy", &program_path, "--fee", "100"],
+    )
+    .unwrap_err();
+    assert!(output.contains("there are not records with enough credits for a 100 gates fee"));
+
+    // transfer a known amount of credits to the test account
+    let validator_home = validator_account_path();
+    let record = client_command(&validator_home, &["account", "records"])
+        .unwrap()
+        .pointer("/1/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    client_command(
+        &validator_home,
+        &[
+            "credits",
+            "transfer",
+            &record,
+            credentials.get("address").unwrap(),
+            "10u64",
+        ],
+    )
     .unwrap();
+
+    assert_balance(receiver_home, 10).unwrap();
+
+    // try to run a deployment with a fee of more credits than available, should fail
+    let output = client_command(
+        receiver_home,
+        &["program", "deploy", &program_path, "--fee", "100"],
+    )
+    .unwrap_err();
+    assert!(output.contains("there are not records with enough credits for a 100 gates fee"));
+
+    // run a deployment with fee
+    client_command(
+        receiver_home,
+        &["program", "deploy", &program_path, "--fee", "2"],
+    )
+    .unwrap();
+    assert_balance(receiver_home, 8).unwrap();
+
+    // run an execution with fee
+    client_command(
+        receiver_home,
+        &[
+            "program",
+            "execute",
+            &program_path,
+            "hello",
+            "1u32",
+            "1u32",
+            "--fee",
+            "2",
+        ],
+    )
+    .unwrap();
+    assert_balance(receiver_home, 6).unwrap();
+
+    // run a credits execution with a fee, should account for the implicit fees
+    let record = client_command(receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // at this point there's a single record in the account, since we want to run a credits program
+    // below and also pay a separate fee, we'll have to split it first
+    let transaction =
+        client_command(receiver_home, &["credits", "split", &record, "3u64"]).unwrap();
+
+    // request the transaction until it's committed before moving on, to ensure records are available
+    let transaction_id = get_transaction_id(&transaction).unwrap();
+    retry_command(receiver_home, &["get", transaction_id]).unwrap();
+
+    let record = client_command(receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // using credits fee as a regular execution because it's the only handy function we have
+    // to generate a transition that spends credits on its own.
+    client_command(
+        receiver_home,
+        &[
+            "program",
+            "execute",
+            "aleo/credits.aleo",
+            "fee",
+            &record,
+            "2u64",
+            "--fee",
+            "3",
+        ],
+    )
+    .unwrap();
+
+    // it had 2 records of 3 credits each. executed the fee function with 2 of input and requested total 3 of fee
+    // the execution has an implicit fee of 2 so another 1 is payed from the other record to reach the requested 3 of fee
+    // so there should be another 3 remaining
+    assert_balance(receiver_home, 3).unwrap();
 }
 
 // HELPERS
@@ -429,13 +541,21 @@ fn get_encrypted_record(transaction: &serde_json::Value) -> &str {
         .unwrap()
 }
 
-fn get_balance(path: &str) -> u64 {
-    client_command(path, &["account", "balance"])
-        .unwrap()
-        .pointer("/balance")
-        .unwrap()
-        .as_u64()
-        .unwrap()
+fn assert_balance(path: &str, expected: u64) -> Result<(), retry::Error<String>> {
+    retry::retry(Fixed::from_millis(1000).take(10), || {
+        let balance = client_command(path, &["account", "balance"])
+            .unwrap()
+            .pointer("/balance")
+            .unwrap()
+            .as_u64()
+            .unwrap();
+
+        if balance == expected {
+            Ok(())
+        } else {
+            Err(format!("expected {expected} found {balance}"))
+        }
+    })
 }
 
 fn execute_program(

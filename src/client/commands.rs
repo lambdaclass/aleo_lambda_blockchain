@@ -1,9 +1,10 @@
 use crate::{account, tendermint};
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use itertools::Itertools;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
-use lib::vm::{self, EncryptedRecord, Identifier, Record, Value};
+use lib::vm;
 use log::debug;
 use serde_json::json;
 use std::path::PathBuf;
@@ -35,7 +36,7 @@ impl Command {
 
             match self {
                 Command::Account(Account::Balance) => {
-                    let balance = get_records(credentials.address, credentials.view_key, &url)
+                    let balance = get_records(&credentials, &url)
                         .await?
                         .iter()
                         .fold(0, |acc, (_, _, record)| acc + ***record.gates());
@@ -43,22 +44,23 @@ impl Command {
                     json!({ "balance": balance })
                 }
                 Command::Account(Account::Records) => {
-                    let records: Vec<serde_json::Value> =
-                        get_records(credentials.address, credentials.view_key, &url)
-                            .await?
-                            .iter()
-                            .map(|(commitment, ciphertext, plaintext)| {
-                                json!({
-                                    "commitment": commitment,
-                                    "ciphertext": ciphertext,
-                                    "record": plaintext
-                                })
+                    let records: Vec<serde_json::Value> = get_records(&credentials, &url)
+                        .await?
+                        .iter()
+                        .map(|(commitment, ciphertext, plaintext)| {
+                            json!({
+                                "commitment": commitment,
+                                "ciphertext": ciphertext,
+                                "record": plaintext
                             })
-                            .collect();
+                        })
+                        .collect();
                     json!(&records)
                 }
-                Command::Program(Program::Deploy { path }) => {
-                    let transaction = Transaction::deployment(&path)?;
+                Command::Program(Program::Deploy { path, fee }) => {
+                    let fee = find_fee_record(&credentials, &url, &fee, &[]).await?;
+                    let transaction =
+                        Transaction::deployment(&path, &credentials.private_key, fee)?;
                     let transaction_serialized = bincode::serialize(&transaction).unwrap();
                     tendermint::broadcast(transaction_serialized, &url).await?;
                     json!(transaction)
@@ -67,23 +69,29 @@ impl Command {
                     path,
                     function,
                     inputs,
+                    fee,
                 }) => {
+                    let fee = find_fee_record(&credentials, &url, &fee, &inputs).await?;
                     let transaction = Transaction::execution(
                         Some(&path),
                         function,
                         &inputs,
                         &credentials.private_key,
+                        fee,
                     )?;
                     let transaction_serialized = bincode::serialize(&transaction).unwrap();
                     tendermint::broadcast(transaction_serialized, &url).await?;
                     json!(transaction)
                 }
                 Command::Credits(credits) => {
+                    let inputs = credits.inputs();
+                    let fee = find_fee_record(&credentials, &url, &credits.fee(), &inputs).await?;
                     let transaction = Transaction::execution(
                         None,
                         credits.identifier()?,
-                        &credits.inputs(),
+                        &inputs,
                         &credentials.private_key,
+                        fee,
                     )?;
                     let transaction_serialized = bincode::serialize(&transaction).unwrap();
                     tendermint::broadcast(transaction_serialized, &url).await?;
@@ -99,13 +107,13 @@ impl Command {
                     if !decrypt {
                         json!(transaction)
                     } else {
-                        let records: Vec<Record> = transaction
+                        let records: Vec<vm::Record> = transaction
                             .output_records()
                             .iter()
-                            .filter(|record| {
+                            .filter(|(_, record)| {
                                 record.is_owner(&credentials.address, &credentials.view_key)
                             })
-                            .filter_map(|record| record.decrypt(&credentials.view_key).ok())
+                            .filter_map(|(_, record)| record.decrypt(&credentials.view_key).ok())
                             .collect();
 
                         json!({
@@ -136,57 +144,82 @@ pub enum Account {
 pub enum Credits {
     /// Transfer credtis to recipient_address from address that owns the input record
     Transfer {
+        #[clap(value_parser=parse_input_record)]
+        input_record: vm::Value,
         #[clap(value_parser=parse_input_value)]
-        input_record: Value,
+        recipient_address: vm::Value,
         #[clap(value_parser=parse_input_value)]
-        recipient_address: Value,
-        #[clap(value_parser=parse_input_value)]
-        amount: Value,
+        amount: vm::Value,
+        /// Amount of gates to pay as fee for this execution. Will be subtracted from one of the account's records.
+        #[clap(short, long)]
+        fee: Option<u64>,
     },
     /// Split input record by amount
     Split {
+        #[clap(value_parser=parse_input_record)]
+        input_record: vm::Value,
         #[clap(value_parser=parse_input_value)]
-        input_record: Value,
-        #[clap(value_parser=parse_input_value)]
-        amount: Value,
+        amount: vm::Value,
+        /// Amount of gates to pay as fee for this execution. Will be subtracted from one of the account's records.
+        #[clap(short, long)]
+        fee: Option<u64>,
     },
     /// Combine two records into one
     Combine {
-        #[clap(value_parser=parse_input_value)]
-        first_record: Value,
-        #[clap(value_parser=parse_input_value)]
-        second_record: Value,
+        #[clap(value_parser=parse_input_record)]
+        first_record: vm::Value,
+        #[clap(value_parser=parse_input_record)]
+        second_record: vm::Value,
+        /// Amount of gates to pay as fee for this execution. Will be subtracted from one of the account's records.
+        #[clap(short, long)]
+        fee: Option<u64>,
     },
 }
 
 impl Credits {
-    pub fn inputs(self) -> Vec<Value> {
+    pub fn inputs(&self) -> Vec<vm::Value> {
         match self {
             Credits::Transfer {
                 input_record,
                 recipient_address,
                 amount,
-            } => vec![input_record, recipient_address, amount],
+                ..
+            } => vec![
+                input_record.clone(),
+                recipient_address.clone(),
+                amount.clone(),
+            ],
             Credits::Combine {
                 first_record,
                 second_record,
-            } => vec![first_record, second_record],
+                ..
+            } => vec![first_record.clone(), second_record.clone()],
             Credits::Split {
                 input_record,
                 amount,
-            } => vec![input_record, amount],
+                ..
+            } => vec![input_record.clone(), amount.clone()],
         }
     }
 
-    pub fn identifier(&self) -> Result<Identifier> {
+    pub fn identifier(&self) -> Result<vm::Identifier> {
         match self {
-            Credits::Combine { .. } => Identifier::try_from("combine"),
-            Credits::Split { .. } => Identifier::try_from("split"),
-            Credits::Transfer { .. } => Identifier::try_from("transfer"),
+            Credits::Combine { .. } => vm::Identifier::try_from("combine"),
+            Credits::Split { .. } => vm::Identifier::try_from("split"),
+            Credits::Transfer { .. } => vm::Identifier::try_from("transfer"),
+        }
+    }
+
+    pub fn fee(&self) -> Option<u64> {
+        match self {
+            Credits::Transfer { fee, .. } => *fee,
+            Credits::Split { fee, .. } => *fee,
+            Credits::Combine { fee, .. } => *fee,
         }
     }
 }
 
+// TODO move these enums to the top of the file (so the commands are visible before the impl methods)
 /// Commands to manage program transactions.
 #[derive(Debug, Parser)]
 pub enum Program {
@@ -195,6 +228,9 @@ pub enum Program {
         /// Path where the aleo program file resides.
         #[clap(value_parser)]
         path: PathBuf,
+        /// Amount of gates to pay as fee for this deployment. Will be subtracted from one of the account's records.
+        #[clap(short, long)]
+        fee: Option<u64>,
     },
     /// Runs locally and sends an execution transaction to the Blockchain, returning the Transaction ID
     Execute {
@@ -203,10 +239,13 @@ pub enum Program {
         path: PathBuf,
         /// The function name.
         #[clap(value_parser)]
-        function: Identifier,
+        function: vm::Identifier,
         /// The function inputs.
         #[clap(value_parser=parse_input_value)]
-        inputs: Vec<Value>,
+        inputs: Vec<vm::Value>,
+        /// Amount of gates to pay as fee for this execution. Will be subtracted from one of the account's records.
+        #[clap(short, long)]
+        fee: Option<u64>,
     },
 }
 
@@ -223,12 +262,14 @@ pub struct Get {
     pub decrypt: bool,
 }
 
-pub async fn get_records(
-    address: vm::Address,
-    view_key: vm::ViewKey,
+async fn get_records(
+    credentials: &account::Credentials,
     url: &str,
 ) -> Result<Vec<(vm::Field, vm::EncryptedRecord, vm::Record)>> {
-    let abci_query = AbciQuery::RecordsUnspentOwned { address, view_key };
+    let abci_query = AbciQuery::RecordsUnspentOwned {
+        address: credentials.address,
+        view_key: credentials.view_key,
+    };
     let query_serialized = bincode::serialize(&abci_query).unwrap();
     let response = tendermint::query(query_serialized, url).await?;
     let records: Vec<(vm::Field, vm::EncryptedRecord)> = bincode::deserialize(&response)?;
@@ -236,34 +277,85 @@ pub async fn get_records(
     let records = records
         .into_iter()
         .map(|(commitment, ciphertext)| {
-            let record = ciphertext.decrypt(&view_key).unwrap();
+            let record = ciphertext.decrypt(&credentials.view_key).unwrap();
             (commitment, ciphertext, record)
         })
         .collect();
     Ok(records)
 }
 
+/// Given a desired amount of fee to pay, find the record on this account with the smallest
+/// amount of gates that can be used to pay the fee, and that isn't already being used as
+/// an execution input.
+async fn find_fee_record(
+    credentials: &account::Credentials,
+    url: &str,
+    amount: &Option<u64>,
+    inputs: &[vm::Value],
+) -> Result<Option<(u64, vm::Record)>> {
+    if amount.is_none() {
+        return Ok(None);
+    }
+    let amount = amount.unwrap();
+
+    // save the input records to make sure that we don't use one of the other execution inputs as the fee
+    // this should be a HashSet instead, but Record doesn't implement hash
+    let input_records: Vec<vm::Record> = inputs
+        .iter()
+        .filter_map(|value| {
+            if let vm::Value::Record(record) = value {
+                Some(record.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let record = get_records(credentials, url)
+        .await?
+        .into_iter()
+        .sorted_by_key(|(_, _, record)| -(vm::gates(record) as i64))
+        .find(|(_, _, record)| {
+            // note that here we require that the amount of the record be more than the requested fee
+            // even though there may be implicit fees in the execution that make the actual amount to be subtracted
+            // less that that amount, but since we don't have the execution transitions yet, we can't know at this point
+            // so we make this stricter requirement.
+            !input_records.contains(record) && vm::gates(record) >= amount
+        })
+        .map(|(_, _, record)| record)
+        .ok_or_else(|| {
+            anyhow!("there are not records with enough credits for a {amount} gates fee")
+        })?;
+
+    Ok(Some((amount, record)))
+}
+
 /// Extends the snarkvm's default argument parsing to support using record ciphertexts as record inputs
-pub fn parse_input_value(input: &str) -> Result<Value> {
+fn parse_input_value(input: &str) -> Result<vm::Value> {
     // try parsing an encrypted record string
     if input.starts_with("record") {
-        let credentials = account::Credentials::load()?;
-        let ciphertext = EncryptedRecord::from_str(input)?;
-        let record = ciphertext.decrypt(&credentials.view_key)?;
-        return Ok(Value::Record(record));
+        return parse_input_record(input);
     }
 
     // %account is a syntactic sugar for current user address
     if input == "%account" {
         let credentials = account::Credentials::load()?;
         let address = credentials.address.to_string();
-        return Value::from_str(&address);
+        return vm::Value::from_str(&address);
     }
 
     // try parsing a jsonified plaintext record
-    if let Ok(record) = serde_json::from_str::<Record>(input) {
-        return Ok(Value::Record(record));
+    if let Ok(record) = serde_json::from_str::<vm::Record>(input) {
+        return Ok(vm::Value::Record(record));
     }
     // otherwise fallback to parsing a snarkvm literal
-    Value::from_str(input)
+    vm::Value::from_str(input)
+}
+
+pub fn parse_input_record(input: &str) -> Result<vm::Value> {
+    let ciphertext = vm::EncryptedRecord::from_str(input)?;
+    let credentials = account::Credentials::load()?;
+    ciphertext
+        .decrypt(&credentials.view_key)
+        .map(vm::Value::Record)
 }

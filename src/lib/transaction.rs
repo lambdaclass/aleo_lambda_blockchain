@@ -1,11 +1,11 @@
 use crate::vm::{self};
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use log::debug;
 use rand;
 use serde::{Deserialize, Serialize};
-use snarkvm::prelude::{Ciphertext, Record, Testnet3};
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Transaction {
@@ -13,6 +13,7 @@ pub enum Transaction {
         id: String,
         program: Box<vm::Program>,
         verifying_keys: vm::VerifyingKeyMap,
+        fee: Option<vm::Transition>,
     },
     Execution {
         id: String,
@@ -22,17 +23,22 @@ pub enum Transaction {
 
 impl Transaction {
     // Used to generate deployment of a new program in path
-    pub fn deployment(path: &Path) -> Result<Self> {
+    pub fn deployment(
+        path: &Path,
+        private_key: &vm::PrivateKey,
+        fee: Option<(u64, vm::Record)>,
+    ) -> Result<Self> {
         let program_string = fs::read_to_string(path)?;
-        let mut rng = rand::thread_rng();
-        debug!("Deploying program {}", program_string);
         let program = vm::generate_program(&program_string)?;
+        debug!("Deploying program {}", program_string);
+
+        let mut rng = rand::thread_rng();
         let verifying_keys = vm::generate_verifying_keys(&program, &mut rng)?;
-        // using a uuid for txid, just to skip having to use an additional fee record which now is necessary to run
-        // Transaction::from_deployment
         let id = uuid::Uuid::new_v4().to_string();
+        let fee = Self::execute_fee(private_key, fee, 0)?;
         Ok(Transaction::Deployment {
             id,
+            fee,
             program: Box::new(program),
             verifying_keys,
         })
@@ -44,10 +50,11 @@ impl Transaction {
         function_name: vm::Identifier,
         inputs: &[vm::Value],
         private_key: &vm::PrivateKey,
+        requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
         let rng = &mut rand::thread_rng();
 
-        let transitions = if let Some(path) = path {
+        let mut transitions = if let Some(path) = path {
             let program_string = fs::read_to_string(path)?;
 
             vm::generate_execution(&program_string, function_name, inputs, private_key, rng)?
@@ -55,8 +62,14 @@ impl Transaction {
             vm::credits_execution(function_name, inputs, private_key, rng)?
         };
 
-        let id = uuid::Uuid::new_v4().to_string();
+        // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
+        // subtracted from the fees that were requested to be paid.
+        let implicit_fees = transitions.iter().map(|transition| transition.fee()).sum();
+        if let Some(transition) = Self::execute_fee(private_key, requested_fee, implicit_fees)? {
+            transitions.push(transition);
+        }
 
+        let id = uuid::Uuid::new_v4().to_string();
         Ok(Self::Execution { id, transitions })
     }
 
@@ -67,38 +80,88 @@ impl Transaction {
         }
     }
 
-    pub fn output_records(&self) -> Vec<&Record<Testnet3, Ciphertext<Testnet3>>> {
-        if let Transaction::Execution { transitions, .. } = self {
-            transitions
-                .iter()
-                .flat_map(|transition| transition.output_records())
-                .map(|(_, record)| record)
-                .collect()
-        } else {
-            Vec::new()
-        }
+    pub fn output_records(&self) -> Vec<(vm::Field, vm::EncryptedRecord)> {
+        self.transitions()
+            .iter()
+            .flat_map(|transition| transition.output_records())
+            .map(|(commitment, record)| (*commitment, record.clone()))
+            .collect()
     }
 
     /// If the transaction is an execution, return the list of input record origins
     /// (in case they are record commitments).
-    pub fn origin_commitments(&self) -> Vec<&vm::Field> {
-        if let Transaction::Execution {
-            ref transitions, ..
-        } = self
-        {
-            transitions
+    pub fn origin_commitments(&self) -> Vec<vm::Field> {
+        self.transitions()
+            .iter()
+            .flat_map(|transition| transition.origins())
+            .filter_map(|origin| {
+                if let vm::Origin::Commitment(commitment) = origin {
+                    Some(*commitment)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn transitions(&self) -> Vec<vm::Transition> {
+        match self {
+            Transaction::Deployment { fee, .. } => {
+                if let Some(transition) = fee {
+                    vec![transition.clone()]
+                } else {
+                    vec![]
+                }
+            }
+            Transaction::Execution { transitions, .. } => transitions.clone(),
+        }
+    }
+
+    /// Return the sum of the transition fees contained in this transition.
+    /// For deployments it's the fee of the fee specific transition, if present.
+    /// For executions, it's the sum of the fees of all the execution transitions.
+    pub fn fees(&self) -> i64 {
+        match self {
+            Transaction::Deployment { fee, .. } => {
+                fee.as_ref().map_or(0, |transition| *transition.fee())
+            }
+            Transaction::Execution { transitions, .. } => transitions
                 .iter()
-                .flat_map(|transition| transition.origins())
-                .filter_map(|origin| {
-                    if let vm::Origin::Commitment(commitment) = origin {
-                        Some(commitment)
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+                .fold(0, |acc, transition| acc + transition.fee()),
+        }
+    }
+
+    /// If there is some required fee, return the transition resulting of executing
+    /// the fee function of the credits program for the requested amount.
+    /// The fee function just burns the desired amount of credits, so its effect is just
+    /// to produce a difference between the input/output records of its transition.
+    fn execute_fee(
+        private_key: &vm::PrivateKey,
+        requested_fee: Option<(u64, vm::Record)>,
+        implicit_fee: i64,
+    ) -> Result<Option<vm::Transition>> {
+        let mut rng = rand::thread_rng();
+        if let Some((gates, record)) = requested_fee {
+            ensure!(
+                implicit_fee >= 0,
+                "execution produced a negative fee, cannot create credits"
+            );
+
+            if implicit_fee > gates as i64 {
+                // already covered by implicit fee, don't spend the record
+                return Ok(None);
+            }
+
+            let gates = gates as i64 - implicit_fee;
+            let fee_function = vm::Identifier::from_str("fee")?;
+            let inputs = [
+                vm::Value::Record(record),
+                vm::Value::from_str(&format!("{gates}u64"))?,
+            ];
+            let transitions = vm::credits_execution(fee_function, &inputs, private_key, &mut rng)?;
+            Ok(Some(transitions.first().unwrap().clone()))
         } else {
-            Vec::new()
+            Ok(None)
         }
     }
 }

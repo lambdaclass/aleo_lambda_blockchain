@@ -2,9 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::record_store::RecordStore;
 use crate::{program_store::ProgramStore, validator_set::ValidatorSet};
-use anyhow::{anyhow, bail, ensure, Result};
+use anyhow::{bail, ensure, Result};
+use itertools::Itertools;
 use lib::{query::AbciQuery::RecordsUnspentOwned, transaction::Transaction, vm, GenesisState};
-use snarkvm::prelude::Itertools;
 use tendermint_abci::Application;
 use tendermint_proto::abci;
 
@@ -104,13 +104,15 @@ impl Application for SnarkVMApp {
 
         let tx = bincode::deserialize(&request.tx).unwrap();
 
-        // TODO do we need to explicitly check the record serial number to guarantee it's being spent
-        // by its owner? or is that already included in the execution verification?
-
         let result = self
             .check_no_duplicate_records(&tx)
             .and_then(|_| self.check_inputs_are_unspent(&tx))
             .and_then(|_| self.validate_transaction(&tx));
+
+        // by making the priority equal to the fees we give more priority to higher-paying transactions
+        // NOTE: we haven't thoroughly tested tendermint prioritized mempool, see for background
+        // https://github.com/tendermint/tendermint/discussions/9772
+        let priority = tx.fees();
 
         if let Err(err) = result {
             abci::ResponseCheckTx {
@@ -121,6 +123,7 @@ impl Application for SnarkVMApp {
             }
         } else {
             abci::ResponseCheckTx {
+                priority,
                 ..Default::default()
             }
         }
@@ -185,12 +188,10 @@ impl Application for SnarkVMApp {
             .check_no_duplicate_records(&tx)
             .and_then(|_| self.check_inputs_are_unspent(&tx))
             .and_then(|_| self.validate_transaction(&tx))
-            .and_then(|_| self.collect_fees(&tx))
+            .map(|_| self.validators.lock().unwrap().add(tx.fees() as u64))
             .and_then(|_| self.spend_input_records(&tx))
             .and_then(|_| self.add_output_records(&tx))
             .and_then(|_| self.store_program(&tx));
-        // FIXME we currently apply tx changes --program deploys-- right away
-        // but this should be done in the commit phase.
 
         match result {
             Ok(_) => {
@@ -300,8 +301,8 @@ impl SnarkVMApp {
     /// Mark all input records as spent in the record store. This operation could fail if the records are unknown or already spent,
     /// but it's assumed the that was validated before as to prevent half-applied transactions in the block.
     fn spend_input_records(&self, transaction: &Transaction) -> Result<()> {
-        let commitments = transaction.origin_commitments();
-        commitments
+        transaction
+            .origin_commitments()
             .iter()
             .map(|commitment| self.records.spend(commitment))
             .find(|result| result.is_err())
@@ -310,19 +311,12 @@ impl SnarkVMApp {
 
     /// Add the tranasction output records as unspent in the record store.
     fn add_output_records(&self, transaction: &Transaction) -> Result<()> {
-        if let Transaction::Execution {
-            ref transitions, ..
-        } = transaction
-        {
-            transitions
-                .iter()
-                .flat_map(|transition| transition.output_records())
-                .map(|(commitment, record)| self.records.add(*commitment, record.clone()))
-                .find(|result| result.is_err())
-                .unwrap_or(Ok(()))
-        } else {
-            Ok(())
-        }
+        transaction
+            .output_records()
+            .iter()
+            .map(|(commitment, record)| self.records.add(*commitment, record.clone()))
+            .find(|result| result.is_err())
+            .unwrap_or(Ok(()))
     }
 
     fn validate_transaction(&self, transaction: &Transaction) -> Result<()> {
@@ -330,6 +324,7 @@ impl SnarkVMApp {
             Transaction::Deployment {
                 ref program,
                 verifying_keys,
+                fee,
                 ..
             } => {
                 ensure!(
@@ -337,29 +332,23 @@ impl SnarkVMApp {
                     format!("Program already exists: {}", program.id())
                 );
 
+                if let Some(transition) = fee {
+                    self.verify_transition(transition)?;
+                }
+
                 // verify deployment is correct and keys are valid
                 vm::verify_deployment(program, verifying_keys.clone())
             }
-            Transaction::Execution {
-                ref transitions, ..
-            } => {
-                let transition = transitions
-                    .first()
-                    .ok_or_else(|| anyhow!("missing transition"))?;
+            Transaction::Execution { transitions, .. } => {
+                ensure!(
+                    !transitions.is_empty(),
+                    "There are no transitions in the execution"
+                );
 
-                // TODO this assumes only one transition represents the program, is this correct?
-                let stored_keys = self.programs.get(transition.program_id())?;
-
-                // only verify if we have the program available
-                // TODO review if we really need to store the program
-                if let Some((_program, keys)) = stored_keys {
-                    vm::verify_execution(transitions, &keys)
-                } else {
-                    bail!(format!(
-                        "Program {} does not exist",
-                        transition.program_id()
-                    ))
+                for transition in transitions {
+                    self.verify_transition(transition)?;
                 }
+                Ok(())
             }
         };
 
@@ -370,20 +359,19 @@ impl SnarkVMApp {
         result
     }
 
-    /// Add the transaction fees to the current block's validator rewards.
-    fn collect_fees(&self, transaction: &Transaction) -> Result<()> {
-        let fees = match transaction {
-            Transaction::Deployment { .. } => {
-                // TODO deployment should have an optional fee transition
-                0
-            }
-            Transaction::Execution { transitions, .. } => transitions
-                .iter()
-                .fold(0, |acc, transition| acc + transition.fee()),
-        };
+    /// Check the given execution transition with the verifying keys from the program store
+    fn verify_transition(&self, transition: &vm::Transition) -> Result<()> {
+        let stored_keys = self.programs.get(transition.program_id())?;
 
-        self.validators.lock().unwrap().add(fees as u64);
-        Ok(())
+        // only verify if we have the program available
+        if let Some((_program, keys)) = stored_keys {
+            vm::verify_execution(transition, &keys)
+        } else {
+            bail!(format!(
+                "Program {} does not exist",
+                transition.program_id()
+            ))
+        }
     }
 
     /// Apply the transaction side-effects to the application (off-ledger) state, for
