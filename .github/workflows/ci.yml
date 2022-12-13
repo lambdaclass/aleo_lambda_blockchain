@@ -22,7 +22,7 @@ jobs:
           make node > /dev/null &
           make abci > /dev/null &
           while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done
-          cargo test --release
+          make test
   clippy:
     runs-on: [self-hosted, nomad]
     steps:
