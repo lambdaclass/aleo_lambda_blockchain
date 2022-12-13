@@ -1,0 +1,32 @@
+name: Build and push snarkvm_abci binary
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build-binary:
+    name: Build and push snarkvm_abci binary
+
+    runs-on: [self-hosted, nomad]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+            profile: minimal
+
+      - name: Build snarkvm_abci
+        run: cargo build --release
+
+      - name: Compress binary and save filename to env
+        run: |
+          tar -cz target/release/snarkvm_abci -f snarkvm_abci-$(git rev-parse --short HEAD).tgz
+          echo BINARY_COMPRESSED=$(ls -ltr snarkvm_abci-*.tgz | tail -n 1 | awk '{print $9}') >> $GITHUB_ENV
+
+      - name: Upload binary to S3
+        run: |
+          aws s3 cp ${BINARY_COMPRESSED} s3://entropy-releases/snarkvm_abci/${BINARY_COMPRESSED}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-west-2
