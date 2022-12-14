@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProgramFile {
     program: jaleo::Program,
-    keys: vm::FunctionKeys,
+    keys: vm::ProgramBuild,
 }
 
 impl ProgramFile {
@@ -18,9 +18,9 @@ impl ProgramFile {
         let program_str = std::fs::read_to_string(input_path)
             .map_err(|e| anyhow!("couldn't find program source: {e}"))?;
 
-        let build = jaleo::generate_deployment(&program_str)?;
+        let (program, keys) = vm::build_program(&program_str)?;
 
-        Ok(Self { program: build.program, keys: build.verifying_keys })
+        Ok(Self { program, keys })
     }
 
     pub fn save(&self, output_path: &Path) -> Result<()> {
@@ -28,7 +28,7 @@ impl ProgramFile {
         std::fs::write(output_path, json).map_err(|e| anyhow!(e))
     }
 
-    pub fn load(path: &Path) -> Result<(jaleo::Program, vm::FunctionKeys)> {
+    pub fn load(path: &Path) -> Result<(jaleo::Program, vm::ProgramBuild)> {
         let json = std::fs::read_to_string(path)
             .map_err(|e| anyhow!("couldn't find stored program: {e}"))?;
         let stored: Self = serde_json::from_str(&json)?;
