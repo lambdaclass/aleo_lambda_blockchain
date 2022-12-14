@@ -7,6 +7,7 @@ use lib::transaction::Transaction;
 use lib::vm;
 use log::debug;
 use serde_json::json;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::vec;
@@ -16,11 +17,114 @@ pub enum Command {
     #[clap(subcommand)]
     Account(Account),
     #[clap(subcommand)]
+    Credits(Credits),
+    #[clap(subcommand)]
     Program(Program),
     #[clap(name = "get")]
     Get(Get),
-    #[clap(subcommand)]
-    Credits(Credits),
+}
+
+/// Commands to manage accounts.
+#[derive(Debug, Parser)]
+pub enum Account {
+    New,
+    /// Fetches the unspent records owned by the given account.
+    Records,
+    /// Fetches the unspent records owned by the given account and calculates the final credits balance.
+    Balance,
+}
+
+#[derive(Debug, Parser)]
+pub enum Credits {
+    /// Transfer credtis to recipient_address from address that owns the input record
+    Transfer {
+        #[clap(value_parser=parse_input_record)]
+        input_record: vm::Value,
+        #[clap(value_parser=parse_input_value)]
+        recipient_address: vm::Value,
+        #[clap(value_parser=parse_input_value)]
+        amount: vm::Value,
+        /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
+        #[clap(long)]
+        fee: Option<u64>,
+        /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
+        #[clap(long, value_parser=parse_input_record)]
+        fee_record: Option<vm::Value>,
+    },
+    /// Split input record by amount
+    Split {
+        #[clap(value_parser=parse_input_record)]
+        input_record: vm::Value,
+        #[clap(value_parser=parse_input_value)]
+        amount: vm::Value,
+        /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
+        #[clap(long)]
+        fee: Option<u64>,
+        /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
+        #[clap(long, value_parser=parse_input_record)]
+        fee_record: Option<vm::Value>,
+    },
+    /// Combine two records into one
+    Combine {
+        #[clap(value_parser=parse_input_record)]
+        first_record: vm::Value,
+        #[clap(value_parser=parse_input_record)]
+        second_record: vm::Value,
+        /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
+        #[clap(long)]
+        fee: Option<u64>,
+        /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
+        #[clap(long, value_parser=parse_input_record)]
+        fee_record: Option<vm::Value>,
+    },
+}
+
+/// Commands to manage program transactions.
+#[derive(Debug, Parser)]
+pub enum Program {
+    /// Builds and sends a deployment transaction to the Blockchain, returning the Transaction ID
+    Deploy {
+        /// Path where the aleo program file resides.
+        #[clap(value_parser)]
+        path: PathBuf,
+        /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
+        #[clap(long)]
+        fee: Option<u64>,
+        /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
+        #[clap(long, value_parser=parse_input_record)]
+        fee_record: Option<vm::Value>,
+    },
+    /// Runs locally and sends an execution transaction to the Blockchain, returning the Transaction ID
+    Execute {
+        /// Path where the package resides.
+        #[clap(value_parser)]
+        path: PathBuf,
+        /// The function name.
+        #[clap(value_parser)]
+        function: vm::Identifier,
+        /// The function inputs.
+        #[clap(value_parser=parse_input_value)]
+        inputs: Vec<vm::Value>,
+        /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
+        #[clap(long)]
+        fee: Option<u64>,
+        /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
+        #[clap(long, value_parser=parse_input_record)]
+        fee_record: Option<vm::Value>,
+    },
+}
+
+/// Return the status of a Transaction: Type, whether it is committed to the ledger, and the program name.
+/// In the case of execution transactions, it also outputs the function's inputs and outputs.
+#[derive(Debug, Parser)]
+pub struct Get {
+    /// Transaction ID from which to retrieve information
+    #[clap(value_parser)]
+    pub transaction_id: String,
+
+    /// Whether to decrypt the incoming transaction private records
+    #[clap(short, long, default_value_t = false)]
+    pub decrypt: bool,
 }
 
 impl Command {
@@ -57,8 +161,12 @@ impl Command {
                         .collect();
                     json!(&records)
                 }
-                Command::Program(Program::Deploy { path, fee }) => {
-                    let fee = find_fee_record(&credentials, &url, &fee, &[]).await?;
+                Command::Program(Program::Deploy {
+                    path,
+                    fee,
+                    fee_record,
+                }) => {
+                    let fee = choose_fee_record(&credentials, &url, &fee, &fee_record, &[]).await?;
                     let transaction =
                         Transaction::deployment(&path, &credentials.private_key, fee)?;
                     let transaction_serialized = bincode::serialize(&transaction).unwrap();
@@ -70,8 +178,10 @@ impl Command {
                     function,
                     inputs,
                     fee,
+                    fee_record,
                 }) => {
-                    let fee = find_fee_record(&credentials, &url, &fee, &inputs).await?;
+                    let fee =
+                        choose_fee_record(&credentials, &url, &fee, &fee_record, &inputs).await?;
                     let transaction = Transaction::execution(
                         Some(&path),
                         function,
@@ -85,7 +195,10 @@ impl Command {
                 }
                 Command::Credits(credits) => {
                     let inputs = credits.inputs();
-                    let fee = find_fee_record(&credentials, &url, &credits.fee(), &inputs).await?;
+                    let (fee_amount, fee_record) = credits.fee();
+                    let fee =
+                        choose_fee_record(&credentials, &url, &fee_amount, &fee_record, &inputs)
+                            .await?;
                     let transaction = Transaction::execution(
                         None,
                         credits.identifier()?,
@@ -130,52 +243,6 @@ impl Command {
     }
 }
 
-/// Commands to manage accounts.
-#[derive(Debug, Parser)]
-pub enum Account {
-    New,
-    /// Fetches the unspent records owned by the given account.
-    Records,
-    /// Fetches the unspent records owned by the given account and calculates the final credits balance.
-    Balance,
-}
-
-#[derive(Debug, Parser)]
-pub enum Credits {
-    /// Transfer credtis to recipient_address from address that owns the input record
-    Transfer {
-        #[clap(value_parser=parse_input_record)]
-        input_record: vm::Value,
-        #[clap(value_parser=parse_input_value)]
-        recipient_address: vm::Value,
-        #[clap(value_parser=parse_input_value)]
-        amount: vm::Value,
-        /// Amount of gates to pay as fee for this execution. Will be subtracted from one of the account's records.
-        #[clap(short, long)]
-        fee: Option<u64>,
-    },
-    /// Split input record by amount
-    Split {
-        #[clap(value_parser=parse_input_record)]
-        input_record: vm::Value,
-        #[clap(value_parser=parse_input_value)]
-        amount: vm::Value,
-        /// Amount of gates to pay as fee for this execution. Will be subtracted from one of the account's records.
-        #[clap(short, long)]
-        fee: Option<u64>,
-    },
-    /// Combine two records into one
-    Combine {
-        #[clap(value_parser=parse_input_record)]
-        first_record: vm::Value,
-        #[clap(value_parser=parse_input_record)]
-        second_record: vm::Value,
-        /// Amount of gates to pay as fee for this execution. Will be subtracted from one of the account's records.
-        #[clap(short, long)]
-        fee: Option<u64>,
-    },
-}
-
 impl Credits {
     pub fn inputs(&self) -> Vec<vm::Value> {
         match self {
@@ -210,124 +277,19 @@ impl Credits {
         }
     }
 
-    pub fn fee(&self) -> Option<u64> {
+    pub fn fee(&self) -> (Option<u64>, Option<vm::Value>) {
         match self {
-            Credits::Transfer { fee, .. } => *fee,
-            Credits::Split { fee, .. } => *fee,
-            Credits::Combine { fee, .. } => *fee,
+            Credits::Transfer {
+                fee, fee_record, ..
+            } => (*fee, fee_record.clone()),
+            Credits::Split {
+                fee, fee_record, ..
+            } => (*fee, fee_record.clone()),
+            Credits::Combine {
+                fee, fee_record, ..
+            } => (*fee, fee_record.clone()),
         }
     }
-}
-
-// TODO move these enums to the top of the file (so the commands are visible before the impl methods)
-/// Commands to manage program transactions.
-#[derive(Debug, Parser)]
-pub enum Program {
-    /// Builds and sends a deployment transaction to the Blockchain, returning the Transaction ID
-    Deploy {
-        /// Path where the aleo program file resides.
-        #[clap(value_parser)]
-        path: PathBuf,
-        /// Amount of gates to pay as fee for this deployment. Will be subtracted from one of the account's records.
-        #[clap(short, long)]
-        fee: Option<u64>,
-    },
-    /// Runs locally and sends an execution transaction to the Blockchain, returning the Transaction ID
-    Execute {
-        /// Path where the package resides.
-        #[clap(value_parser)]
-        path: PathBuf,
-        /// The function name.
-        #[clap(value_parser)]
-        function: vm::Identifier,
-        /// The function inputs.
-        #[clap(value_parser=parse_input_value)]
-        inputs: Vec<vm::Value>,
-        /// Amount of gates to pay as fee for this execution. Will be subtracted from one of the account's records.
-        #[clap(short, long)]
-        fee: Option<u64>,
-    },
-}
-
-/// Return the status of a Transaction: Type, whether it is committed to the ledger, and the program name.
-/// In the case of execution transactions, it also outputs the function's inputs and outputs.
-#[derive(Debug, Parser)]
-pub struct Get {
-    /// Transaction ID from which to retrieve information
-    #[clap(value_parser)]
-    pub transaction_id: String,
-
-    /// Whether to decrypt the incoming transaction private records
-    #[clap(short, long, default_value_t = false)]
-    pub decrypt: bool,
-}
-
-async fn get_records(
-    credentials: &account::Credentials,
-    url: &str,
-) -> Result<Vec<(vm::Field, vm::EncryptedRecord, vm::Record)>> {
-    let abci_query = AbciQuery::RecordsUnspentOwned {
-        address: credentials.address,
-        view_key: credentials.view_key,
-    };
-    let query_serialized = bincode::serialize(&abci_query).unwrap();
-    let response = tendermint::query(query_serialized, url).await?;
-    let records: Vec<(vm::Field, vm::EncryptedRecord)> = bincode::deserialize(&response)?;
-    debug!("Records: {:?}", records);
-    let records = records
-        .into_iter()
-        .map(|(commitment, ciphertext)| {
-            let record = ciphertext.decrypt(&credentials.view_key).unwrap();
-            (commitment, ciphertext, record)
-        })
-        .collect();
-    Ok(records)
-}
-
-/// Given a desired amount of fee to pay, find the record on this account with the smallest
-/// amount of gates that can be used to pay the fee, and that isn't already being used as
-/// an execution input.
-async fn find_fee_record(
-    credentials: &account::Credentials,
-    url: &str,
-    amount: &Option<u64>,
-    inputs: &[vm::Value],
-) -> Result<Option<(u64, vm::Record)>> {
-    if amount.is_none() {
-        return Ok(None);
-    }
-    let amount = amount.unwrap();
-
-    // save the input records to make sure that we don't use one of the other execution inputs as the fee
-    // this should be a HashSet instead, but Record doesn't implement hash
-    let input_records: Vec<vm::Record> = inputs
-        .iter()
-        .filter_map(|value| {
-            if let vm::Value::Record(record) = value {
-                Some(record.clone())
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let record = get_records(credentials, url)
-        .await?
-        .into_iter()
-        .sorted_by_key(|(_, _, record)| -(vm::gates(record) as i64))
-        .find(|(_, _, record)| {
-            // note that here we require that the amount of the record be more than the requested fee
-            // even though there may be implicit fees in the execution that make the actual amount to be subtracted
-            // less that that amount, but since we don't have the execution transitions yet, we can't know at this point
-            // so we make this stricter requirement.
-            !input_records.contains(record) && vm::gates(record) >= amount
-        })
-        .map(|(_, _, record)| record)
-        .ok_or_else(|| {
-            anyhow!("there are not records with enough credits for a {amount} gates fee")
-        })?;
-
-    Ok(Some((amount, record)))
 }
 
 /// Extends the snarkvm's default argument parsing to support using record ciphertexts as record inputs
@@ -358,4 +320,163 @@ pub fn parse_input_record(input: &str) -> Result<vm::Value> {
     ciphertext
         .decrypt(&credentials.view_key)
         .map(vm::Value::Record)
+}
+
+async fn get_records(
+    credentials: &account::Credentials,
+    url: &str,
+) -> Result<Vec<(vm::Field, vm::EncryptedRecord, vm::Record)>> {
+    let abci_query = AbciQuery::RecordsUnspentOwned {
+        address: credentials.address,
+        view_key: credentials.view_key,
+    };
+    let query_serialized = bincode::serialize(&abci_query).unwrap();
+    let response = tendermint::query(query_serialized, url).await?;
+    let records: Vec<(vm::Field, vm::EncryptedRecord)> = bincode::deserialize(&response)?;
+    debug!("Records: {:?}", records);
+    let records = records
+        .into_iter()
+        .map(|(commitment, ciphertext)| {
+            let record = ciphertext.decrypt(&credentials.view_key).unwrap();
+            (commitment, ciphertext, record)
+        })
+        .collect();
+    Ok(records)
+}
+
+/// Given a desired amount of fee to pay, find the record on this account with the biggest
+/// amount of gates that can be used to pay the fee, and that isn't already being used as
+/// an execution input. If a record is already provided, use that, otherwise select a default
+/// record from the account.
+async fn choose_fee_record(
+    credentials: &account::Credentials,
+    url: &str,
+    amount: &Option<u64>,
+    record: &Option<vm::Value>,
+    inputs: &[vm::Value],
+) -> Result<Option<(u64, vm::Record)>> {
+    if amount.is_none() {
+        return Ok(None);
+    }
+    let amount = amount.unwrap();
+
+    if let Some(vm::Value::Record(record)) = record {
+        return Ok(Some((amount, record.clone())));
+    }
+
+    let account_records: Vec<vm::Record> = get_records(credentials, url)
+        .await?
+        .into_iter()
+        .map(|(_, _, record)| record)
+        .collect();
+
+    select_default_fee_record(amount, inputs, &account_records).map(|record| Some((amount, record)))
+}
+
+/// Select one of the records to be used to pay the requested fee,
+/// that is not already being used as input to the execution.
+/// The biggest record is chosen as the default under the assumption
+/// that choosing the best fit would lead to record fragmentation.
+fn select_default_fee_record(
+    amount: u64,
+    inputs: &[vm::Value],
+    account_records: &[vm::Record],
+) -> Result<vm::Record> {
+    // save the input records to make sure that we don't use one of the other execution inputs as the fee
+    let input_records: HashSet<String> = inputs
+        .iter()
+        .filter_map(|value| {
+            if let vm::Value::Record(record) = value {
+                Some(record.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    account_records
+        .iter()
+        .sorted_by_key(|record|
+                       // negate to get bigger records first
+                       -(vm::gates(record) as i64))
+        .find(|record| {
+            // note that here we require that the amount of the record be more than the requested fee
+            // even though there may be implicit fees in the execution that make the actual amount to be subtracted
+            // less that that amount, but since we don't have the execution transitions yet, we can't know at this point
+            // so we make this stricter requirement.
+            !input_records.contains(&record.to_string()) && vm::gates(record) >= amount
+        })
+        .ok_or_else(|| {
+            anyhow!("there are not records with enough credits for a {amount} gates fee")
+        })
+        .cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn select_default_record() {
+        let private_key = vm::PrivateKey::new(&mut rand::thread_rng()).unwrap();
+        let view_key = vm::ViewKey::try_from(&private_key).unwrap();
+        let address = vm::Address::try_from(&view_key).unwrap();
+
+        let record10 = mint_record(&address, &view_key, 10);
+        let record5 = mint_record(&address, &view_key, 5);
+        let record6 = mint_record(&address, &view_key, 6);
+
+        // if no records in account, fail
+        let error = select_default_fee_record(10, &[], &[]).unwrap_err();
+        assert_eq!(
+            "there are not records with enough credits for a 10 gates fee",
+            error.to_string()
+        );
+
+        // if several records but none big enough, fail
+        let error =
+            select_default_fee_record(10, &[], &[record5.clone(), record6.clone()]).unwrap_err();
+        assert_eq!(
+            "there are not records with enough credits for a 10 gates fee",
+            error.to_string()
+        );
+
+        // if one record no input, choose it
+        let result = select_default_fee_record(5, &[], &[record6.clone()]).unwrap();
+        assert_eq!(record6, result);
+
+        // if one record but also input, fail
+        let error =
+            select_default_fee_record(5, &[vm::Value::Record(record6.clone())], &[record6.clone()])
+                .unwrap_err();
+        assert_eq!(
+            "there are not records with enough credits for a 5 gates fee",
+            error.to_string()
+        );
+
+        // if several records, choose the biggest one
+        let result = select_default_fee_record(
+            5,
+            &[],
+            &[record5.clone(), record10.clone(), record6.clone()],
+        )
+        .unwrap();
+        assert_eq!(record10, result);
+
+        let result = select_default_fee_record(
+            5,
+            &[vm::Value::Record(record10.clone())],
+            &[record5, record10, record6.clone()],
+        )
+        .unwrap();
+        assert_eq!(record6, result);
+    }
+
+    fn mint_record(address: &vm::Address, view_key: &vm::ViewKey, amount: u64) -> vm::Record {
+        vm::mint_credits(address, amount, 123)
+            .unwrap()
+            .1
+            .decrypt(view_key)
+            .unwrap()
+    }
 }

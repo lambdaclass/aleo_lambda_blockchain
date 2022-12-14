@@ -155,7 +155,7 @@ impl ValidatorSet {
                     "Assigning {credits} credits to {aleo_address} (voting power {})",
                     self.current_votes.get(address).unwrap()
                 );
-                let record = vm::mint_credits(aleo_address, credits, self.current_height)
+                let record = vm::mint_credits(&aleo_address, credits, self.current_height)
                     .expect("Couldn't mint credit records for reward");
                 output_records.push(record);
             }

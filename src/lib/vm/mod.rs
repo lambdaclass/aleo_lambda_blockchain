@@ -256,14 +256,14 @@ fn execute(
 /// Generate a credits record of the given amount for the given owner,
 /// by using the given seed to deterministically generate a nonce.
 pub fn mint_credits(
-    owner_address: Address,
+    owner_address: &Address,
     credits: u64,
     seed: u64,
 ) -> Result<(Field, EncryptedRecord)> {
     // TODO have someone verify/audit this, probably it's unsafe or breaks cryptographic assumptions
 
     let owner = Owner::Private(Plaintext::Literal(
-        Literal::Address(owner_address),
+        Literal::Address(*owner_address),
         Default::default(),
     ));
     let amount = Integer::new(credits);

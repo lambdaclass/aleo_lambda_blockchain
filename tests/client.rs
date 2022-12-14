@@ -421,6 +421,33 @@ fn transaction_fees() {
     // the execution has an implicit fee of 2 so another 1 is payed from the other record to reach the requested 3 of fee
     // so there should be another 3 remaining
     assert_balance(receiver_home, 3).unwrap();
+
+    // run another command specifying which record to use
+    let record = client_command(receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    client_command(
+        receiver_home,
+        &[
+            "program",
+            "execute",
+            &program_path,
+            "hello",
+            "1u32",
+            "1u32",
+            "--fee",
+            "1",
+            "--fee-record",
+            &record,
+        ],
+    )
+    .unwrap();
+    assert_balance(receiver_home, 2).unwrap();
 }
 
 // HELPERS
