@@ -1,10 +1,9 @@
-/// This module includes helper functions initially taken from SnarkVM's Stack struct.
-/// The goal is to progressively remove the dependency on that struct.
-use std::sync::Arc;
-
 use super::Program;
 use anyhow::{ensure, Result};
 use snarkvm::prelude::{RegisterTypes, Testnet3, UniversalSRS};
+/// This module includes helper functions initially taken from SnarkVM's Stack struct.
+/// The goal is to progressively remove the dependency on that struct.
+use std::sync::Arc;
 
 pub type Stack = snarkvm::prelude::Stack<Testnet3>;
 
@@ -12,8 +11,6 @@ pub type Stack = snarkvm::prelude::Stack<Testnet3>;
 /// related to Programs (deploy, executions, key synthesis) without the need of a `Process`. It essentially combines
 /// Stack::new() and Stack::init()
 pub fn new_init(program: &Program) -> Result<Stack> {
-    let universal_srs = Arc::new(UniversalSRS::<Testnet3>::load()?);
-
     // Retrieve the program ID.
     let program_id = program.id();
 
@@ -24,6 +21,8 @@ pub fn new_init(program: &Program) -> Result<Stack> {
     );
 
     // Construct the stack for the program.
+    let universal_srs = Arc::new(UniversalSRS::<Testnet3>::load()?);
+
     let mut stack = Stack {
         program: program.clone(),
         external_stacks: Default::default(),
@@ -48,6 +47,7 @@ pub fn new_init(program: &Program) -> Result<Stack> {
         // Add the function name and register types to the stack.
         stack.register_types.insert(*name, register_types);
     }
+
     // Return the stack.
     Ok(stack)
 }

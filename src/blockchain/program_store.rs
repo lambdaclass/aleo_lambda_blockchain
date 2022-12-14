@@ -1,8 +1,6 @@
 use anyhow::{anyhow, Result};
-use lib::vm::{Program, ProgramID, VerifyingKey, VerifyingKeyMap};
+use lib::vm::{self, Program, ProgramID, VerifyingKeyMap};
 use log::{debug, error};
-use snarkvm::parameters;
-use snarkvm::prelude::FromBytes;
 use std::str::FromStr;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
@@ -128,14 +126,7 @@ impl ProgramStore {
             let mut key_map = VerifyingKeyMap::new();
 
             for function_name in credits_program.functions().keys() {
-                let (_, verifying_key) = parameters::testnet3::TESTNET3_CREDITS_PROGRAM
-                    .get(&function_name.to_string())
-                    .ok_or_else(|| {
-                        anyhow!("Circuit keys for credits.aleo/{function_name}' not found")
-                    })?;
-
-                let verifying_key = VerifyingKey::from_bytes_le(verifying_key)?;
-
+                let (_, verifying_key) = vm::get_credits_key(function_name)?;
                 key_map.insert(*function_name, verifying_key);
             }
 
@@ -146,10 +137,8 @@ impl ProgramStore {
 
 #[cfg(test)]
 mod tests {
-    use lib::vm::{self, Program};
-    use rand::thread_rng;
-
     use super::*;
+    use lib::vm::{self, Program};
     use std::{fs, str::FromStr};
 
     #[ctor::ctor]
@@ -202,17 +191,18 @@ mod tests {
     }
 
     fn store_program(program_store: &ProgramStore, path: &str) -> Result<vm::Program> {
-        let mut rng = thread_rng();
         let program_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
 
         let program_string = fs::read_to_string(program_path).unwrap();
         let program = vm::generate_program(&program_string)?;
 
-        program_store.add(
-            program.id(),
-            &program,
-            &vm::generate_verifying_keys(&program, &mut rng)?,
-        )?;
+        // generate program keys (proving and verifying) and keep the verifying one for the store
+        let keys = vm::synthesize_program_keys(&program)?
+            .into_iter()
+            .map(|(i, (_, verifying_key))| (i, verifying_key))
+            .collect();
+
+        program_store.add(program.id(), &program, &keys)?;
 
         Ok(program)
     }

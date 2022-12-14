@@ -50,7 +50,7 @@ fn main() -> Result<()> {
         println!("Generating record for {aleo_address}");
         // NOTE: using a hardcoded seed, not for production!
         let seed = 123;
-        let record = vm::mint_credits(aleo_address, cli.amount, seed)?;
+        let record = vm::mint_credits(&aleo_address, cli.amount, seed)?;
         genesis_records.push(record);
     }
 

@@ -71,7 +71,7 @@ fn program_validations() {
     // fail on unknown function
     let error =
         execute_program(home_path, &program_path, UNKNOWN_PROGRAM, &["1u32", "1u32"]).unwrap_err();
-    assert!(error.contains("\\\"Function \\'unknown\\' does not exist."));
+    assert!(error.contains("does not exist"));
 
     // fail on missing parameter
     let error = execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32"]).unwrap_err();
@@ -110,7 +110,7 @@ fn decrypt_records() {
 
     let (_acc_file, home_path, _) = &new_account();
 
-    // should fail to decrypt records (different credentials)
+    // // should fail to decrypt records (different credentials)
     let transaction = retry_command(home_path, &["get", transaction_id, "-d"]).unwrap();
 
     let decrypted_records = transaction
@@ -216,6 +216,7 @@ fn consume_records() {
 
     // execute consume with same output record, execution fails, no double spend
     let error = execute_program(home_path, &program_path, CONSUME_FUNCTION, &[record]).unwrap_err();
+
     assert!(error.contains("is unknown or already spent"));
 
     // create a fake record
@@ -232,7 +233,8 @@ fn consume_records() {
     // execute with made output record, execution fails, no use unknown record
     let error =
         execute_program(home_path, &program_path, CONSUME_FUNCTION, &[&record]).unwrap_err();
-    assert!(error.contains("Invalid value"));
+
+    assert!(error.contains("must belong to the signer") || error.contains("Invalid value"));
 }
 
 #[test]
@@ -421,6 +423,33 @@ fn transaction_fees() {
     // the execution has an implicit fee of 2 so another 1 is payed from the other record to reach the requested 3 of fee
     // so there should be another 3 remaining
     assert_balance(receiver_home, 3).unwrap();
+
+    // run another command specifying which record to use
+    let record = client_command(receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    client_command(
+        receiver_home,
+        &[
+            "program",
+            "execute",
+            &program_path,
+            "hello",
+            "1u32",
+            "1u32",
+            "--fee",
+            "1",
+            "--fee-record",
+            &record,
+        ],
+    )
+    .unwrap();
+    assert_balance(receiver_home, 2).unwrap();
 }
 
 // HELPERS

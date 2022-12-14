@@ -1,28 +1,33 @@
-use anyhow::{anyhow, bail, ensure, Result};
-use log::debug;
-use parking_lot::{lock_api::RwLock, RawRwLock};
-use rand::rngs::ThreadRng;
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
-use snarkvm::{
-    circuit::{AleoV0, IndexMap},
-    console::types::string::Integer,
-    prelude::{
-        Balance, CallStack, Environment, Itertools, Literal, Network, One, Owner, Plaintext,
-        Testnet3, ToBits, ToField, Uniform, I64,
-    },
-};
 /// Library for interfacing with the VM, and generating Transactions
 ///
 use std::{ops::Deref, str::FromStr, sync::Arc};
+
+use anyhow::{anyhow, bail, ensure, Result};
+use indexmap::IndexMap;
+use log::debug;
+use parking_lot::{lock_api::RwLock, RawRwLock};
+use rand::{rngs::ThreadRng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
+use snarkvm::{
+    circuit::AleoV0,
+    console::types::string::Integer,
+    prelude::{
+        Balance, CallStack, Environment, FromBytes, Itertools, Literal, Network, One, Owner,
+        Plaintext, Testnet3, ToField, Uniform, I64,
+    },
+};
+
+use snarkvm::parameters;
+
 mod stack;
+
 pub type Address = snarkvm::prelude::Address<Testnet3>;
 pub type Identifier = snarkvm::prelude::Identifier<Testnet3>;
 pub type Value = snarkvm::prelude::Value<Testnet3>;
 pub type Program = snarkvm::prelude::Program<Testnet3>;
 pub type Ciphertext = snarkvm::prelude::Ciphertext<Testnet3>;
-type Execution = snarkvm::prelude::Execution<Testnet3>;
 pub type Record = snarkvm::prelude::Record<Testnet3, snarkvm::prelude::Plaintext<Testnet3>>;
+type Execution = snarkvm::prelude::Execution<Testnet3>;
 pub type EncryptedRecord = snarkvm::prelude::Record<Testnet3, Ciphertext>;
 pub type ViewKey = snarkvm::prelude::ViewKey<Testnet3>;
 pub type PrivateKey = snarkvm::prelude::PrivateKey<Testnet3>;
@@ -31,9 +36,11 @@ pub type Origin = snarkvm::prelude::Origin<Testnet3>;
 pub type Output = snarkvm::prelude::Output<Testnet3>;
 pub type ProgramID = snarkvm::prelude::ProgramID<Testnet3>;
 pub type VerifyingKey = snarkvm::prelude::VerifyingKey<Testnet3>;
+pub type ProvingKey = snarkvm::prelude::ProvingKey<Testnet3>;
 pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Transition = snarkvm::prelude::Transition<Testnet3>;
 pub type VerifyingKeyMap = IndexMap<Identifier, VerifyingKey>;
+pub type KeyPairMap = IndexMap<Identifier, (ProvingKey, VerifyingKey)>;
 
 /// Basic deployment validations
 pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> Result<()> {
@@ -73,7 +80,7 @@ pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> 
 
 pub fn verify_execution(transition: &Transition, verifying_keys: &VerifyingKeyMap) -> Result<()> {
     // Verify each transition.
-    debug!(
+    log::debug!(
         "Verifying transition for {}/{}...",
         transition.program_id(),
         transition.function_name()
@@ -145,7 +152,8 @@ pub fn verify_execution(transition: &Transition, verifying_keys: &VerifyingKeyMa
     );
     // [Inputs] Extend the verifier inputs with the fee.
     inputs.push(*I64::<Testnet3>::new(*transition.fee()).to_field()?);
-    debug!(
+
+    log::debug!(
         "Transition public inputs ({} elements): {:#?}",
         inputs.len(),
         inputs
@@ -163,20 +171,38 @@ pub fn verify_execution(transition: &Transition, verifying_keys: &VerifyingKeyMa
     Ok(())
 }
 
-// these struct-level functions should probably not be in the Vm level
-pub fn generate_verifying_keys(program: &Program, rng: &mut ThreadRng) -> Result<VerifyingKeyMap> {
-    // NOTE: we're skipping the part of imported programs
-    // https://github.com/Entropy1729/snarkVM/blob/2c4e282df46ed71c809fd4b49738fd78562354ac/vm/package/deploy.rs#L149
+/// Generate proving and verifying keys for each function in the given program,
+/// and return them in a function name -> (proving key, verifying key) map.
+pub fn synthesize_program_keys(program: &Program) -> Result<KeyPairMap> {
+    let mut verifying_keys = IndexMap::new();
 
+    for function_name in program.functions().keys() {
+        let rng = &mut rand::thread_rng();
+        verifying_keys.insert(
+            *function_name,
+            synthesize_function_keys(program, rng, function_name)?,
+        );
+    }
+
+    Ok(verifying_keys)
+}
+
+/// Generate proving and verifying keys for the given function.
+pub fn synthesize_function_keys(
+    program: &Program,
+    rng: &mut ThreadRng,
+    function_name: &Identifier,
+) -> Result<(ProvingKey, VerifyingKey)> {
     let stack = stack::new_init(program)?;
+    stack.synthesize_key::<AleoV0, _>(function_name, rng)?;
+    let proving_key = stack.proving_keys.read().get(function_name).cloned();
+    let proving_key = proving_key.ok_or_else(|| anyhow!("proving key not found for identifier"))?;
 
-    stack.deploy::<AleoV0, _>(rng).map(|deploy| {
-        deploy
-            .verifying_keys()
-            .iter()
-            .map(|(id, vk)| (*id, vk.0.clone()))
-            .collect()
-    })
+    let verifying_key = stack.verifying_keys.read().get(function_name).cloned();
+    let verifying_key =
+        verifying_key.ok_or_else(|| anyhow!("verifying key not found for identifier"))?;
+
+    Ok((proving_key, verifying_key))
 }
 
 // Generates a program deployment for source transactions
@@ -185,82 +211,58 @@ pub fn generate_program(program_string: &str) -> Result<Program> {
     Program::from_str(program_string)
 }
 
-pub fn generate_execution(
-    program_string: &str,
-    function_name: Identifier,
-    inputs: &[Value],
-    private_key: &PrivateKey,
-    rng: &mut ThreadRng,
-) -> Result<Vec<Transition>> {
-    let program: Program = Program::from_str(program_string)?;
-
-    // we check this on the verify side (which will run in the blockchain)
-    // repeating here just to fail early
-    ensure!(
-        !Program::is_coinbase(program.id(), &function_name),
-        "Coinbase functions cannot be called"
-    );
-
-    execute(program, function_name, inputs, private_key, rng)
-}
-
-pub fn credits_execution(
-    function_name: Identifier,
-    inputs: &[Value],
-    private_key: &PrivateKey,
-    rng: &mut ThreadRng,
-) -> Result<Vec<Transition>> {
-    let credits_program = Program::credits()?;
-    execute(credits_program, function_name, inputs, private_key, rng)
-}
-
-fn execute(
+pub fn execution(
     program: Program,
     function_name: Identifier,
     inputs: &[Value],
     private_key: &PrivateKey,
     rng: &mut ThreadRng,
+    key: ProvingKey,
 ) -> Result<Vec<Transition>> {
+    ensure!(
+        !Program::is_coinbase(program.id(), &function_name),
+        "Coinbase functions cannot be called"
+    );
+
     ensure!(
         program.contains_function(&function_name),
         "Function '{function_name}' does not exist."
     );
-
-    let stack = stack::new_init(&program)?;
-
-    // Synthesize each proving and verifying key.
-    for function_name in program.functions().keys() {
-        stack.synthesize_key::<AleoV0, _>(function_name, rng)?
-    }
 
     debug!(
         "executing program {} function {} inputs {:?}",
         program, function_name, inputs
     );
 
-    let authorization = stack.authorize::<AleoV0, _>(private_key, function_name, inputs, rng)?;
+    let stack = stack::new_init(&program)?;
 
+    stack.insert_proving_key(&function_name, key)?;
+
+    let authorization = stack.authorize::<AleoV0, _>(private_key, function_name, inputs, rng)?;
     let execution: Arc<RwLock<RawRwLock, _>> = Arc::new(RwLock::new(Execution::new()));
+
     // Execute the circuit.
     let _ = stack.execute_function::<AleoV0, _>(
         CallStack::execute(authorization, execution.clone())?,
         rng,
     )?;
+
     let execution = execution.read().clone();
+
     Ok(execution.into_transitions().collect())
 }
 
 /// Generate a credits record of the given amount for the given owner,
 /// by using the given seed to deterministically generate a nonce.
 pub fn mint_credits(
-    owner_address: Address,
+    owner_address: &Address,
     credits: u64,
     seed: u64,
 ) -> Result<(Field, EncryptedRecord)> {
     // TODO have someone verify/audit this, probably it's unsafe or breaks cryptographic assumptions
 
     let owner = Owner::Private(Plaintext::Literal(
-        Literal::Address(owner_address),
+        Literal::Address(*owner_address),
         Default::default(),
     ));
     let amount = Integer::new(credits);
@@ -276,6 +278,17 @@ pub fn mint_credits(
     let commitment = public_record.to_commitment(Program::credits()?.id(), &record_name)?;
     let encrypted_record = public_record.encrypt(randomizer)?;
     Ok((commitment, encrypted_record))
+}
+
+pub fn get_credits_key(function_name: &Identifier) -> Result<(ProvingKey, VerifyingKey)> {
+    let (prov_key, ver_key) = parameters::testnet3::TESTNET3_CREDITS_PROGRAM
+        .get(&function_name.to_string())
+        .ok_or_else(|| anyhow!("Circuit keys for credits.aleo/{function_name}' not found"))?;
+
+    let ver_key = VerifyingKey::from_bytes_le(ver_key)?;
+    let prov_key = ProvingKey::from_bytes_le(prov_key)?;
+
+    Ok((prov_key, ver_key))
 }
 
 /// Extract the record gates (the minimal credits unit) as a u64 integer, instead of a snarkvm internal type.

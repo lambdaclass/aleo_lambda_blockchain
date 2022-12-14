@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod program_file;
 pub mod query;
 pub mod transaction;
 pub mod vm;
