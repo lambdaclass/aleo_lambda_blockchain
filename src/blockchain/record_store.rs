@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use lib::vm::{EncryptedRecord, Field};
+use lib::jaleo::{self, Field};
 use log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use std::collections::{HashMap, HashSet};
@@ -19,7 +19,7 @@ type Value = Vec<u8>;
 /// Internal channel reply for the scan command
 type ScanReply = (Vec<(Key, Value)>, Option<Key>);
 /// Public return type for the scan command.
-type ScanResult = (Vec<(Commitment, EncryptedRecord)>, Option<SerialNumber>);
+type ScanResult = (Vec<(Commitment, jaleo::JAleoRecord)>, Option<SerialNumber>);
 
 /// The record store tracks the known unspent and spent record sets (similar to bitcoin's UTXO set)
 /// according to the transactions that are committed to the ledger.
@@ -180,7 +180,7 @@ impl RecordStore {
     }
 
     /// Saves a new unspent record to the write buffer
-    pub fn add(&self, commitment: Commitment, record: EncryptedRecord) -> Result<()> {
+    pub fn add(&self, commitment: Commitment, record: jaleo::JAleoRecord) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         let commitment = commitment.to_string().into_bytes();
@@ -236,7 +236,7 @@ impl RecordStore {
             .map(|(commitment, record)| {
                 let commitment =
                     Commitment::from_str(&String::from_utf8_lossy(commitment)).unwrap();
-                let record = EncryptedRecord::from_str(&String::from_utf8_lossy(record)).unwrap();
+                let record: jaleo::JAleoRecord = serde_json::from_str(&String::from_utf8_lossy(record)).unwrap();
                 (commitment, record)
             })
             .collect();
@@ -261,176 +261,175 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
     !matches!(db.get(key), Ok(None))
 }
 
-#[cfg(test)]
-mod tests {
-    use lib::vm::{self, PrivateKey};
+// #[cfg(test)]
+// mod tests {
+//     use lib::jaleo::{Identifier, ProgramID, PrivateKey};
+//     use vmtropy::snarkvm::prelude::{Uniform, Testnet3, Network};
 
-    use snarkvm::prelude::{Identifier, Network, ProgramID, Testnet3, Uniform};
+//     use super::*;
+//     use std::{fs, str::FromStr};
+//     type PublicRecord = lib::jaleo::JAleoRecord;
 
-    use super::*;
-    use std::{fs, str::FromStr};
-    type PublicRecord = lib::vm::Record;
+//     #[ctor::ctor]
+//     fn init() {
+//         simple_logger::SimpleLogger::new()
+//             .env()
+//             .with_level(log::LevelFilter::Info)
+//             .init()
+//             .unwrap();
 
-    #[ctor::ctor]
-    fn init() {
-        simple_logger::SimpleLogger::new()
-            .env()
-            .with_level(log::LevelFilter::Info)
-            .init()
-            .unwrap();
+//         fs::remove_dir_all(db_path("")).unwrap_or_default();
+//     }
 
-        fs::remove_dir_all(db_path("")).unwrap_or_default();
-    }
+//     fn db_path(suffix: &str) -> String {
+//         format!(".db_test/{suffix}")
+//     }
 
-    fn db_path(suffix: &str) -> String {
-        format!(".db_test/{suffix}")
-    }
+//     #[test]
+//     fn add_and_spend_record() {
+//         let store = RecordStore::new(&db_path("records1")).unwrap();
+//         let (record, commitment, serial_number) = new_record();
+//         store.add(commitment, record).unwrap();
+//         assert!(store.is_unspent(&serial_number).unwrap());
+//         store.commit().unwrap();
+//         assert!(store.is_unspent(&serial_number).unwrap());
+//         store.spend(&serial_number).unwrap();
+//         assert!(!store.is_unspent(&serial_number).unwrap());
+//         store.commit().unwrap();
+//         assert!(!store.is_unspent(&serial_number).unwrap());
 
-    #[test]
-    fn add_and_spend_record() {
-        let store = RecordStore::new(&db_path("records1")).unwrap();
-        let (record, commitment, serial_number) = new_record();
-        store.add(commitment, record).unwrap();
-        assert!(store.is_unspent(&serial_number).unwrap());
-        store.commit().unwrap();
-        assert!(store.is_unspent(&serial_number).unwrap());
-        store.spend(&serial_number).unwrap();
-        assert!(!store.is_unspent(&serial_number).unwrap());
-        store.commit().unwrap();
-        assert!(!store.is_unspent(&serial_number).unwrap());
+//         let msg = store
+//             .spend(&serial_number)
+//             .unwrap_err()
+//             .root_cause()
+//             .to_string();
+//         assert_eq!("record already spent", msg);
 
-        let msg = store
-            .spend(&serial_number)
-            .unwrap_err()
-            .root_cause()
-            .to_string();
-        assert_eq!("record already spent", msg);
+//         // FIXME patching rocksdb weird behavior
+//         std::mem::forget(store);
+//     }
 
-        // FIXME patching rocksdb weird behavior
-        std::mem::forget(store);
-    }
+//     #[test]
+//     fn no_double_add_record() {
+//         let store = RecordStore::new(&db_path("records2")).unwrap();
 
-    #[test]
-    fn no_double_add_record() {
-        let store = RecordStore::new(&db_path("records2")).unwrap();
+//         let (record, commitment, _) = new_record();
+//         store.add(commitment, record.clone()).unwrap();
+//         let msg = store
+//             .add(commitment, record)
+//             .unwrap_err()
+//             .root_cause()
+//             .to_string();
+//         assert_eq!(format!("record {commitment} already exists"), msg);
+//         store.commit().unwrap();
 
-        let (record, commitment, _) = new_record();
-        store.add(commitment, record.clone()).unwrap();
-        let msg = store
-            .add(commitment, record)
-            .unwrap_err()
-            .root_cause()
-            .to_string();
-        assert_eq!(format!("record {commitment} already exists"), msg);
-        store.commit().unwrap();
+//         let (record, commitment, _) = new_record();
+//         store.add(commitment, record.clone()).unwrap();
+//         store.commit().unwrap();
+//         let msg = store
+//             .add(commitment, record)
+//             .unwrap_err()
+//             .root_cause()
+//             .to_string();
+//         assert_eq!(format!("record {commitment} already exists"), msg);
 
-        let (record, commitment, _) = new_record();
-        store.add(commitment, record.clone()).unwrap();
-        store.commit().unwrap();
-        let msg = store
-            .add(commitment, record)
-            .unwrap_err()
-            .root_cause()
-            .to_string();
-        assert_eq!(format!("record {commitment} already exists"), msg);
+//         // FIXME patching rocksdb weird behavior
+//         std::mem::forget(store);
+//     }
 
-        // FIXME patching rocksdb weird behavior
-        std::mem::forget(store);
-    }
+//     #[test]
+//     fn spend_before_commit() {
+//         let store = RecordStore::new(&db_path("records3")).unwrap();
 
-    #[test]
-    fn spend_before_commit() {
-        let store = RecordStore::new(&db_path("records3")).unwrap();
+//         let (record, commitment, serial_number) = new_record();
+//         store.add(commitment, record).unwrap();
+//         assert!(store.is_unspent(&serial_number).unwrap());
+//         store.spend(&serial_number).unwrap();
+//         assert!(!store.is_unspent(&serial_number).unwrap());
+//         store.commit().unwrap();
+//         assert!(!store.is_unspent(&serial_number).unwrap());
 
-        let (record, commitment, serial_number) = new_record();
-        store.add(commitment, record).unwrap();
-        assert!(store.is_unspent(&serial_number).unwrap());
-        store.spend(&serial_number).unwrap();
-        assert!(!store.is_unspent(&serial_number).unwrap());
-        store.commit().unwrap();
-        assert!(!store.is_unspent(&serial_number).unwrap());
+//         // FIXME patching rocksdb weird behavior
+//         std::mem::forget(store);
+//     }
 
-        // FIXME patching rocksdb weird behavior
-        std::mem::forget(store);
-    }
+//     #[test]
+//     fn no_double_spend_record() {
+//         let store = RecordStore::new(&db_path("records4")).unwrap();
 
-    #[test]
-    fn no_double_spend_record() {
-        let store = RecordStore::new(&db_path("records4")).unwrap();
+//         // add, commit, spend, commit, fail spend
+//         let (record, commitment, serial_number) = new_record();
+//         store.add(commitment, record).unwrap();
+//         store.commit().unwrap();
+//         assert!(store.is_unspent(&serial_number).unwrap());
+//         store.spend(&serial_number).unwrap();
+//         store.commit().unwrap();
+//         assert!(!store.is_unspent(&serial_number).unwrap());
+//         let msg = store
+//             .spend(&serial_number)
+//             .unwrap_err()
+//             .root_cause()
+//             .to_string();
+//         assert_eq!("record already spent", msg);
 
-        // add, commit, spend, commit, fail spend
-        let (record, commitment, serial_number) = new_record();
-        store.add(commitment, record).unwrap();
-        store.commit().unwrap();
-        assert!(store.is_unspent(&serial_number).unwrap());
-        store.spend(&serial_number).unwrap();
-        store.commit().unwrap();
-        assert!(!store.is_unspent(&serial_number).unwrap());
-        let msg = store
-            .spend(&serial_number)
-            .unwrap_err()
-            .root_cause()
-            .to_string();
-        assert_eq!("record already spent", msg);
+//         // add, commit, spend, fail spend, commit, fail spend
+//         let (record, commitment, serial_number) = new_record();
+//         store.add(commitment, record).unwrap();
+//         store.commit().unwrap();
+//         assert!(store.is_unspent(&serial_number).unwrap());
+//         store.spend(&serial_number).unwrap();
+//         let msg = store
+//             .spend(&serial_number)
+//             .unwrap_err()
+//             .root_cause()
+//             .to_string();
+//         assert_eq!("record already spent", msg);
+//         store.commit().unwrap();
+//         assert!(!store.is_unspent(&serial_number).unwrap());
+//         let msg = store
+//             .spend(&serial_number)
+//             .unwrap_err()
+//             .root_cause()
+//             .to_string();
+//         assert_eq!("record already spent", msg);
 
-        // add, commit, spend, fail spend, commit, fail spend
-        let (record, commitment, serial_number) = new_record();
-        store.add(commitment, record).unwrap();
-        store.commit().unwrap();
-        assert!(store.is_unspent(&serial_number).unwrap());
-        store.spend(&serial_number).unwrap();
-        let msg = store
-            .spend(&serial_number)
-            .unwrap_err()
-            .root_cause()
-            .to_string();
-        assert_eq!("record already spent", msg);
-        store.commit().unwrap();
-        assert!(!store.is_unspent(&serial_number).unwrap());
-        let msg = store
-            .spend(&serial_number)
-            .unwrap_err()
-            .root_cause()
-            .to_string();
-        assert_eq!("record already spent", msg);
+//         // add, spend, fail spend, commit
+//         let (record, commitment, serial_number) = new_record();
+//         store.add(commitment, record).unwrap();
+//         store.spend(&serial_number).unwrap();
+//         let msg = store
+//             .spend(&serial_number)
+//             .unwrap_err()
+//             .root_cause()
+//             .to_string();
+//         assert_eq!("record already spent", msg);
+//         store.commit().unwrap();
+//         assert!(!store.is_unspent(&serial_number).unwrap());
 
-        // add, spend, fail spend, commit
-        let (record, commitment, serial_number) = new_record();
-        store.add(commitment, record).unwrap();
-        store.spend(&serial_number).unwrap();
-        let msg = store
-            .spend(&serial_number)
-            .unwrap_err()
-            .root_cause()
-            .to_string();
-        assert_eq!("record already spent", msg);
-        store.commit().unwrap();
-        assert!(!store.is_unspent(&serial_number).unwrap());
+//         // FIXME patching rocksdb weird behavior
+//         std::mem::forget(store);
+//     }
 
-        // FIXME patching rocksdb weird behavior
-        std::mem::forget(store);
-    }
+//     // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
 
-    // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
+//     fn new_record() -> (jaleo::JAleoRecord, Commitment, SerialNumber) {
+//         let rng = &mut rand::thread_rng();
+//         let randomizer = Uniform::rand(rng);
+//         let nonce = Testnet3::g_scalar_multiply(&randomizer);
+//         let record = PublicRecord::from_str(
+//             &format!("{{ owner: aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {nonce}.public }}"),
+//         ).unwrap();
+//         let program_id = ProgramID::from_str("foo.aleo").unwrap();
+//         let name = Identifier::from_str("bar").unwrap();
+//         let commitment = record.to_commitment(&program_id, &name).unwrap();
+//         let record_ciphertext = record.encrypt(randomizer).unwrap();
 
-    fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
-        let rng = &mut rand::thread_rng();
-        let randomizer = Uniform::rand(rng);
-        let nonce = Testnet3::g_scalar_multiply(&randomizer);
-        let record = PublicRecord::from_str(
-            &format!("{{ owner: aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {nonce}.public }}"),
-        ).unwrap();
-        let program_id = ProgramID::from_str("foo.aleo").unwrap();
-        let name = Identifier::from_str("bar").unwrap();
-        let commitment = record.to_commitment(&program_id, &name).unwrap();
-        let record_ciphertext = record.encrypt(randomizer).unwrap();
+//         // compute serial number to check for spending status
+//         let pk =
+//             PrivateKey::from_str("APrivateKey1zkpCT3zCj49nmVoeBXa21EGLjTUc7AKAcMNKLXzP7kc4cgx")
+//                 .unwrap();
+//         let serial_number = vm::compute_serial_number(pk, commitment).unwrap();
 
-        // compute serial number to check for spending status
-        let pk =
-            PrivateKey::from_str("APrivateKey1zkpCT3zCj49nmVoeBXa21EGLjTUc7AKAcMNKLXzP7kc4cgx")
-                .unwrap();
-        let serial_number = vm::compute_serial_number(pk, commitment).unwrap();
-
-        (record_ciphertext, commitment, serial_number)
-    }
-}
+//         (record_ciphertext, commitment, serial_number)
+//     }
+// }
