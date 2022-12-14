@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 pub mod program_file;
 pub mod query;
 pub mod transaction;
-pub mod vm;
+
+pub use vmtropy as vm;
+pub use vm::jaleo;
 
 #[derive(Deserialize, Serialize)]
 pub struct GenesisState {
-    pub records: Vec<(vm::Field, vm::EncryptedRecord)>,
-    pub validators: HashMap<String, vm::Address>,
+    pub records: Vec<(jaleo::Field, jaleo::JAleoRecord)>,
+    pub validators: HashMap<String, jaleo::Address>,
 }
