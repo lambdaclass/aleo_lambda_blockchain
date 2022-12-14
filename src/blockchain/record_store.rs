@@ -264,7 +264,7 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 #[cfg(test)]
 mod tests {
     use lib::vm::{self, PrivateKey};
-    
+
     use snarkvm::prelude::{Identifier, Network, ProgramID, Testnet3, Uniform};
 
     use super::*;

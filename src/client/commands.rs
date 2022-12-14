@@ -7,7 +7,7 @@ use lib::transaction::Transaction;
 use lib::vm;
 use log::debug;
 use serde_json::json;
-use std::collections::{HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
 
