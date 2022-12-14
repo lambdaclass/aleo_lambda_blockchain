@@ -56,11 +56,10 @@ rand_chacha = "0.3.1"
 indexmap = "1.9.2"
 itertools = "0.10.5"
 
-[dependencies.snarkvm]
-git = "https://github.com/Entropy1729/snarkVM.git"
-branch = "testnet3"
-#path = "../entropy/snarkVM"
-features = ["circuit", "console", "parallel", "parameters"]
+[dependencies.vmtropy]
+# git = "https://github.com/Entropy1729/snarkVM.git"
+# branch = "integration"
+path = "../VMtropy"
 
 [dev-dependencies]
 assert_fs = "1.0.9"
