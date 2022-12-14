@@ -110,7 +110,7 @@ fn decrypt_records() {
 
     let (_acc_file, home_path, _) = &new_account();
 
-    // should fail to decrypt records (different credentials)
+    // // should fail to decrypt records (different credentials)
     let transaction = retry_command(home_path, &["get", transaction_id, "-d"]).unwrap();
 
     let decrypted_records = transaction

@@ -1,11 +1,10 @@
 use anyhow::{anyhow, bail, ensure, Result};
-use log::debug;
+use indexmap::IndexMap;
 use parking_lot::{lock_api::RwLock, RawRwLock};
-use rand::rngs::ThreadRng;
-use rand::SeedableRng;
+use rand::{rngs::ThreadRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use snarkvm::{
-    circuit::{AleoV0, IndexMap},
+    circuit::AleoV0,
     console::types::string::Integer,
     prelude::{
         Balance, CallStack, Environment, Itertools, Literal, Network, One, Owner, Plaintext,
@@ -16,12 +15,12 @@ use snarkvm::{
 ///
 use std::{ops::Deref, str::FromStr, sync::Arc};
 mod stack;
+
 pub type Address = snarkvm::prelude::Address<Testnet3>;
 pub type Identifier = snarkvm::prelude::Identifier<Testnet3>;
 pub type Value = snarkvm::prelude::Value<Testnet3>;
 pub type Program = snarkvm::prelude::Program<Testnet3>;
 pub type Ciphertext = snarkvm::prelude::Ciphertext<Testnet3>;
-type Execution = snarkvm::prelude::Execution<Testnet3>;
 pub type Record = snarkvm::prelude::Record<Testnet3, snarkvm::prelude::Plaintext<Testnet3>>;
 pub type EncryptedRecord = snarkvm::prelude::Record<Testnet3, Ciphertext>;
 pub type ViewKey = snarkvm::prelude::ViewKey<Testnet3>;
@@ -34,6 +33,7 @@ pub type VerifyingKey = snarkvm::prelude::VerifyingKey<Testnet3>;
 pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Transition = snarkvm::prelude::Transition<Testnet3>;
 pub type VerifyingKeyMap = IndexMap<Identifier, VerifyingKey>;
+type Execution = snarkvm::prelude::Execution<Testnet3>;
 
 /// Basic deployment validations
 pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> Result<()> {
@@ -73,7 +73,7 @@ pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> 
 
 pub fn verify_execution(transition: &Transition, verifying_keys: &VerifyingKeyMap) -> Result<()> {
     // Verify each transition.
-    debug!(
+    log::debug!(
         "Verifying transition for {}/{}...",
         transition.program_id(),
         transition.function_name()
@@ -145,7 +145,8 @@ pub fn verify_execution(transition: &Transition, verifying_keys: &VerifyingKeyMa
     );
     // [Inputs] Extend the verifier inputs with the fee.
     inputs.push(*I64::<Testnet3>::new(*transition.fee()).to_field()?);
-    debug!(
+
+    log::debug!(
         "Transition public inputs ({} elements): {:#?}",
         inputs.len(),
         inputs
@@ -233,9 +234,11 @@ fn execute(
         stack.synthesize_key::<AleoV0, _>(function_name, rng)?
     }
 
-    debug!(
+    log::debug!(
         "executing program {} function {} inputs {:?}",
-        program, function_name, inputs
+        program,
+        function_name,
+        inputs
     );
 
     let authorization = stack.authorize::<AleoV0, _>(private_key, function_name, inputs, rng)?;
