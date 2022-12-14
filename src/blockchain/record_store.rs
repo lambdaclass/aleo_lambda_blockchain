@@ -183,7 +183,7 @@ impl RecordStore {
     pub fn add(&self, commitment: Commitment, record: jaleo::JAleoRecord) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
-        let commitment = commitment.to_string().into_bytes();
+        let commitment = commitment.into_bytes();
         let ciphertext = record.to_string().into_bytes();
 
         self.command_sender
@@ -219,7 +219,7 @@ impl RecordStore {
 
     /// Return up to `limit` record ciphertexts
     pub fn scan(&self, from: Option<SerialNumber>, limit: Option<usize>) -> Result<ScanResult> {
-        let from = from.map(|commitment| commitment.to_string().into_bytes());
+        let from = from.map(|commitment| commitment.into_bytes());
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender.send(Command::ScanRecords {

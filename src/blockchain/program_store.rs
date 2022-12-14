@@ -82,7 +82,7 @@ impl ProgramStore {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender
-            .send(Command::Get(*program_id, reply_sender))?;
+            .send(Command::Get(program_id.to_owned(), reply_sender))?;
 
         reply_receiver.recv()?
     }
@@ -97,7 +97,7 @@ impl ProgramStore {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender.send(Command::Add(
-            *program_id,
+            program_id.to_owned(),
             Box::new((program.clone(), verifying_keys.clone())),
             reply_sender,
         ))?;
@@ -110,7 +110,7 @@ impl ProgramStore {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender
-            .send(Command::Exists(*program_id, reply_sender))
+            .send(Command::Exists(program_id.to_owned(), reply_sender))
             .unwrap();
 
         reply_receiver.recv().unwrap_or(false)
@@ -131,7 +131,7 @@ impl ProgramStore {
                 key_map.insert(function_name.to_string(), verifying_key);
             }
 
-            self.add(credits_program.id(), &credits_program, &VerifyingKeyMap { map: key_map })
+            self.add(&credits_program.id().to_string(), &credits_program, &VerifyingKeyMap { map: key_map })
         }
     }
 }
@@ -166,12 +166,12 @@ mod tests {
         let program =
             Program::from_str(fs::read_to_string(program_path).unwrap().as_str()).unwrap();
 
-        let get_program = store.get(program.id());
+        let get_program = store.get(&program.id().to_string());
 
         assert!(get_program.unwrap().is_none());
 
         let storage_attempt = store_program(&store, "/aleo/hello.aleo");
-        assert!(storage_attempt.is_ok() && store.exists(storage_attempt.unwrap().id()));
+        assert!(storage_attempt.is_ok() && store.exists(&storage_attempt.unwrap().id().to_string()));
 
         // FIXME patching rocksdb weird behavior
         std::mem::forget(store);
@@ -188,7 +188,7 @@ mod tests {
         }
         let store = ProgramStore::new(&db_path("credits")).unwrap();
 
-        assert!(store.exists(program.id()));
+        assert!(store.exists(&program.id().to_string()));
     }
 
     fn store_program(program_store: &ProgramStore, path: &str) -> Result<jaleo::Program> {
@@ -207,7 +207,7 @@ mod tests {
 
         let verifying_keys = VerifyingKeyMap { map: keys };
             
-        program_store.add(program.id(), &program, &verifying_keys)?;
+        program_store.add(&program.id().to_string(), &program, &verifying_keys)?;
 
         Ok(program)
     }

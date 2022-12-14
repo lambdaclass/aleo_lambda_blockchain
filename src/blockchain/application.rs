@@ -4,8 +4,9 @@ use crate::record_store::RecordStore;
 use crate::{program_store::ProgramStore, validator_set::ValidatorSet};
 use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
+use lib::jaleo;
 use lib::query::AbciQuery;
-use lib::{transaction::Transaction, vm, GenesisState};
+use lib::{transaction::Transaction, GenesisState};
 use tendermint_abci::Application;
 use tendermint_proto::abci;
 
@@ -325,7 +326,7 @@ impl SnarkVMApp {
         transaction
             .output_records()
             .iter()
-            .map(|(commitment, record)| self.records.add(*commitment, record.clone()))
+            .map(|record| self.records.add(record.commitment()?, record.clone()))
             .find(|result| result.is_err())
             .unwrap_or(Ok(()))
     }
@@ -339,7 +340,7 @@ impl SnarkVMApp {
                 ..
             } => {
                 ensure!(
-                    !self.programs.exists(program.id()),
+                    !self.programs.exists(&program.id().to_string()),
                     format!("Program already exists: {}", program.id())
                 );
 
@@ -348,7 +349,7 @@ impl SnarkVMApp {
                 }
 
                 // verify deployment is correct and keys are valid
-                vm::verify_deployment(program, verifying_keys.clone())
+                jaleo::verify_deployment(program, verifying_keys.clone())
             }
             Transaction::Execution { transitions, .. } => {
                 ensure!(
@@ -371,16 +372,16 @@ impl SnarkVMApp {
     }
 
     /// Check the given execution transition with the verifying keys from the program store
-    fn verify_transition(&self, transition: &vm::Transition) -> Result<()> {
-        let stored_keys = self.programs.get(transition.program_id())?;
+    fn verify_transition(&self, transition: &jaleo::Transition) -> Result<()> {
+        let stored_keys = self.programs.get(&transition.program_id)?;
 
         // only verify if we have the program available
         if let Some((_program, keys)) = stored_keys {
-            vm::verify_execution(transition, &keys)
+            jaleo::verify_execution(transition, &keys)
         } else {
             bail!(format!(
                 "Program {} does not exist",
-                transition.program_id()
+                transition.program_id
             ))
         }
     }
@@ -393,7 +394,7 @@ impl SnarkVMApp {
                 program,
                 verifying_keys,
                 ..
-            } => self.programs.add(program.id(), program, verifying_keys),
+            } => self.programs.add(&program.id().to_string(), program, verifying_keys),
             Transaction::Execution { .. } => {
                 // we run finalize to save the program in the process for later execute verification
                 // it's not clear that we're interested in the store here, but it's required for that function
