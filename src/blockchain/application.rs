@@ -379,10 +379,7 @@ impl SnarkVMApp {
         if let Some((_program, keys)) = stored_keys {
             jaleo::verify_execution(transition, &keys)
         } else {
-            bail!(format!(
-                "Program {} does not exist",
-                transition.program_id
-            ))
+            bail!(format!("Program {} does not exist", transition.program_id))
         }
     }
 
@@ -394,7 +391,9 @@ impl SnarkVMApp {
                 program,
                 verifying_keys,
                 ..
-            } => self.programs.add(&program.id().to_string(), program, verifying_keys),
+            } => self
+                .programs
+                .add(&program.id().to_string(), program, verifying_keys),
             Transaction::Execution { .. } => {
                 // we run finalize to save the program in the process for later execute verification
                 // it's not clear that we're interested in the store here, but it's required for that function

@@ -5,7 +5,7 @@ use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use anyhow::Result;
 use clap::Parser;
-use lib::{GenesisState, jaleo};
+use lib::{jaleo, GenesisState};
 
 /// Takes a list of node directories and updates the genesis files on each of them
 /// to include records to assign default credits to each validator and a mapping

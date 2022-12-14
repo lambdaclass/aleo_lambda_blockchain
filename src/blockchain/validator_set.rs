@@ -361,7 +361,9 @@ mod tests {
             .filter(|(_, record)| {
                 let mut address = [0_u8; 63];
                 let primitive_address = owner.1.to_string();
-                for (address_byte, primitive_address_byte) in address.iter_mut().zip(primitive_address.as_bytes()) {
+                for (address_byte, primitive_address_byte) in
+                    address.iter_mut().zip(primitive_address.as_bytes())
+                {
                     *address_byte = *primitive_address_byte
                 }
                 record.is_owner(&address, &owner.0)

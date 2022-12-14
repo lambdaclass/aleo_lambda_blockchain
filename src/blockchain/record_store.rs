@@ -236,7 +236,8 @@ impl RecordStore {
             .map(|(commitment, record)| {
                 let commitment =
                     Commitment::from_str(&String::from_utf8_lossy(commitment)).unwrap();
-                let record: jaleo::JAleoRecord = serde_json::from_str(&String::from_utf8_lossy(record)).unwrap();
+                let record: jaleo::JAleoRecord =
+                    serde_json::from_str(&String::from_utf8_lossy(record)).unwrap();
                 (commitment, record)
             })
             .collect();

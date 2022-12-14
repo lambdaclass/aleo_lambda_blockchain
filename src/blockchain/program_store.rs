@@ -131,7 +131,11 @@ impl ProgramStore {
                 key_map.insert(function_name.to_string(), verifying_key);
             }
 
-            self.add(&credits_program.id().to_string(), &credits_program, &VerifyingKeyMap { map: key_map })
+            self.add(
+                &credits_program.id().to_string(),
+                &credits_program,
+                &VerifyingKeyMap { map: key_map },
+            )
         }
     }
 }
@@ -171,7 +175,9 @@ mod tests {
         assert!(get_program.unwrap().is_none());
 
         let storage_attempt = store_program(&store, "/aleo/hello.aleo");
-        assert!(storage_attempt.is_ok() && store.exists(&storage_attempt.unwrap().id().to_string()));
+        assert!(
+            storage_attempt.is_ok() && store.exists(&storage_attempt.unwrap().id().to_string())
+        );
 
         // FIXME patching rocksdb weird behavior
         std::mem::forget(store);
@@ -206,7 +212,7 @@ mod tests {
             .collect();
 
         let verifying_keys = VerifyingKeyMap { map: keys };
-            
+
         program_store.add(&program.id().to_string(), &program, &verifying_keys)?;
 
         Ok(program)
