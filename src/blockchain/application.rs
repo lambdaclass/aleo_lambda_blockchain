@@ -5,7 +5,7 @@ use crate::{program_store::ProgramStore, validator_set::ValidatorSet};
 use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
 use lib::query::AbciQuery;
-use lib::{query::AbciQuery::GetRecords, transaction::Transaction, vm, GenesisState};
+use lib::{transaction::Transaction, vm, GenesisState};
 use tendermint_abci::Application;
 use tendermint_proto::abci;
 

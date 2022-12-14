@@ -9,7 +9,7 @@ use snarkvm::{
     console::types::string::Integer,
     prelude::{
         Balance, CallStack, Environment, Itertools, Literal, Network, One, Owner, Plaintext,
-        Testnet3, ToField, Uniform, I64, ToBits,
+        Testnet3, ToBits, ToField, Uniform, I64,
     },
 };
 /// Library for interfacing with the VM, and generating Transactions
@@ -290,8 +290,13 @@ pub fn compute_serial_number(private_key: PrivateKey, commitment: Field) -> Resu
     // Compute `gamma` as `sk_sig * H`.
     let gamma = h * private_key.sk_sig();
     // Compute `sn_nonce` as `Hash(COFACTOR * gamma)`.
-    let sn_nonce =
-        Testnet3::hash_to_scalar_psd2(&[Testnet3::serial_number_domain(), gamma.mul_by_cofactor().to_x_coordinate()])?;
+    let sn_nonce = Testnet3::hash_to_scalar_psd2(&[
+        Testnet3::serial_number_domain(),
+        gamma.mul_by_cofactor().to_x_coordinate(),
+    ])?;
     // Compute `serial_number` as `Commit(commitment, sn_nonce)`.
-    Testnet3::commit_bhp512(&(Testnet3::serial_number_domain(), commitment).to_bits_le(), &sn_nonce)
+    Testnet3::commit_bhp512(
+        &(Testnet3::serial_number_domain(), commitment).to_bits_le(),
+        &sn_nonce,
+    )
 }

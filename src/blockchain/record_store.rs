@@ -104,7 +104,7 @@ impl RecordStore {
                     Command::IsUnspent(serial_number, reply_to) => {
                         // TODO: [related to above] handle record existence scenarios
                         let is_unspent = !key_exists_or_fails(&db_spent, &serial_number)
-                                            && !spent_buffer.contains_key(&serial_number);
+                            && !spent_buffer.contains_key(&serial_number);
                         reply_to
                             .send(is_unspent)
                             .unwrap_or_else(|e| error!("{}", e));
@@ -165,7 +165,8 @@ impl RecordStore {
                             .filter_map(|s| {
                                 s.map(|(k, _)| {
                                     SerialNumber::from_str(&String::from_utf8_lossy(&k)).unwrap()
-                                }).ok()
+                                })
+                                .ok()
                             })
                             .collect();
                         reply_sender
@@ -228,9 +229,8 @@ impl RecordStore {
         })?;
 
         let (results, last_key) = reply_receiver.recv()?;
-        let last_key = last_key.map(|commitment| {
-            Commitment::from_str(&String::from_utf8_lossy(&commitment)).unwrap()
-        });
+        let last_key = last_key
+            .map(|commitment| Commitment::from_str(&String::from_utf8_lossy(&commitment)).unwrap());
         let results = results
             .iter()
             .map(|(commitment, record)| {
@@ -263,8 +263,8 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use lib::vm::{PrivateKey, self};
-    use serde::ser;
+    use lib::vm::{self, PrivateKey};
+    
     use snarkvm::prelude::{Identifier, Network, ProgramID, Testnet3, Uniform};
 
     use super::*;
@@ -299,8 +299,8 @@ mod tests {
         store.commit().unwrap();
         assert!(!store.is_unspent(&serial_number).unwrap());
 
-        let msg = store.
-            spend(&serial_number)
+        let msg = store
+            .spend(&serial_number)
             .unwrap_err()
             .root_cause()
             .to_string();
@@ -366,7 +366,8 @@ mod tests {
         store.spend(&serial_number).unwrap();
         store.commit().unwrap();
         assert!(!store.is_unspent(&serial_number).unwrap());
-        let msg =  store.spend(&serial_number)
+        let msg = store
+            .spend(&serial_number)
             .unwrap_err()
             .root_cause()
             .to_string();
@@ -410,7 +411,7 @@ mod tests {
         std::mem::forget(store);
     }
 
-    // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record 
+    // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
 
     fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
         let rng = &mut rand::thread_rng();
@@ -423,11 +424,13 @@ mod tests {
         let name = Identifier::from_str("bar").unwrap();
         let commitment = record.to_commitment(&program_id, &name).unwrap();
         let record_ciphertext = record.encrypt(randomizer).unwrap();
-        
+
         // compute serial number to check for spending status
-        let pk = PrivateKey::from_str("APrivateKey1zkpCT3zCj49nmVoeBXa21EGLjTUc7AKAcMNKLXzP7kc4cgx").unwrap();
-        let serial_number = vm::compute_serial_number(pk, commitment.clone()).unwrap();
-        
+        let pk =
+            PrivateKey::from_str("APrivateKey1zkpCT3zCj49nmVoeBXa21EGLjTUc7AKAcMNKLXzP7kc4cgx")
+                .unwrap();
+        let serial_number = vm::compute_serial_number(pk, commitment).unwrap();
+
         (record_ciphertext, commitment, serial_number)
     }
 }
