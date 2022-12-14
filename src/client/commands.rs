@@ -262,23 +262,26 @@ pub struct Get {
     pub decrypt: bool,
 }
 
+/// Retrieves all records from the blockchain, and only those that are correctly decrypted
+/// (i.e, are owned by the passed credentials) are returned
 async fn get_records(
     credentials: &account::Credentials,
     url: &str,
 ) -> Result<Vec<(vm::Field, vm::EncryptedRecord, vm::Record)>> {
-    let abci_query = AbciQuery::RecordsUnspentOwned {
-        address: credentials.address,
-        view_key: credentials.view_key,
-    };
-    let query_serialized = bincode::serialize(&abci_query).unwrap();
-    let response = tendermint::query(query_serialized, url).await?;
-    let records: Vec<(vm::Field, vm::EncryptedRecord)> = bincode::deserialize(&response)?;
+    let get_records_response = tendermint::query(AbciQuery::GetRecords.into(), url).await?;
+    let get_spent_records_response = tendermint::query(AbciQuery::GetSpentSerialNumbers.into(), url).await?;
+ 
+    // TODO: cross-check serial numbers generated from records with get_spent_records_response
+
+    let records: Vec<(vm::Field, vm::EncryptedRecord)> = bincode::deserialize(&get_records_response)?;
     debug!("Records: {:?}", records);
     let records = records
         .into_iter()
-        .map(|(commitment, ciphertext)| {
-            let record = ciphertext.decrypt(&credentials.view_key).unwrap();
-            (commitment, ciphertext, record)
+        .filter_map(|(commitment, ciphertext)| {
+            ciphertext
+                .decrypt(&credentials.view_key)
+                .map(|decrypted_record| (commitment, ciphertext, decrypted_record))
+                .ok()
         })
         .collect();
     Ok(records)

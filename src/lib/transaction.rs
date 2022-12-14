@@ -104,6 +104,14 @@ impl Transaction {
             .collect()
     }
 
+    /// If the transaction is an execution, return the list of input record serial numbers
+    pub fn record_serial_numbers(&self) -> Vec<vm::Field> {
+        self.transitions()
+            .iter()
+            .flat_map(|transition| transition.serial_numbers().cloned())
+            .collect()
+    }
+
     fn transitions(&self) -> Vec<vm::Transition> {
         match self {
             Transaction::Deployment { fee, .. } => {

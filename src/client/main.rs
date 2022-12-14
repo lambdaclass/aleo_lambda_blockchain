@@ -44,6 +44,7 @@ async fn main() {
         Ok(output) => (0, output),
         Err(err) => (1, json!({"error": err.to_string()})),
     };
+    
     println!("{output:#}");
     std::process::exit(exit_code);
 }

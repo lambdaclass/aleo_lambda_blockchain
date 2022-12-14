@@ -4,7 +4,8 @@ use crate::record_store::RecordStore;
 use crate::{program_store::ProgramStore, validator_set::ValidatorSet};
 use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
-use lib::{query::AbciQuery::RecordsUnspentOwned, transaction::Transaction, vm, GenesisState};
+use lib::query::AbciQuery;
+use lib::{query::AbciQuery::GetRecords, transaction::Transaction, vm, GenesisState};
 use tendermint_abci::Application;
 use tendermint_proto::abci;
 
@@ -69,31 +70,41 @@ impl Application for SnarkVMApp {
 
     /// This hook is to query the application for data at the current or past height.
     fn query(&self, request: abci::RequestQuery) -> abci::ResponseQuery {
-        let RecordsUnspentOwned { address, view_key } =
-            bincode::deserialize(&request.data).unwrap();
-        info!("Fetching records");
-        // TODO: This fetches all the records from the RecordStore to filter here the
-        // owned ones. With a large database this will involve a lot of data/time
-        // so we should think of a better way to handle this. (eg. pagination or asynchronous
-        // querying)
-        // https://trello.com/c/bP8Nbs7C/170-handle-record-querying-properly-in-recordstore
-        match self.records.scan(None, None) {
-            Ok((records, _last_key)) => {
-                let result: Vec<(vm::Field, vm::EncryptedRecord)> = records
-                    .into_iter()
-                    .filter(|(_, record)| record.is_owner(&address, &view_key))
-                    .collect();
-                abci::ResponseQuery {
-                    value: bincode::serialize(&result).unwrap(),
-                    ..Default::default()
-                }
+        let query: AbciQuery = bincode::deserialize(&request.data).unwrap();
+
+        let query_result = match query {
+            AbciQuery::GetRecords => {
+                info!("Fetching records");
+                // TODO: This fetches all the records from the RecordStore to filter here the
+                // owned ones. With a large database this will involve a lot of data/time
+                // so we should think of a better way to handle this. (eg. pagination or asynchronous
+                // querying)
+                // https://trello.com/c/bP8Nbs7C/170-handle-record-querying-properly-in-recordstore
+                self.records
+                    .scan(None, None)
+                    .map(|result| bincode::serialize(&result.0).unwrap())
             }
-            Err(e) => abci::ResponseQuery {
+            AbciQuery::GetSpentSerialNumbers => {
+                info!("Fetching spent records's serial numbers");
+
+                self.records
+                    .scan_spent()
+                    .map(|result| bincode::serialize(&result).unwrap())
+            }
+        };
+
+        if let Err(e) = query_result {
+            return abci::ResponseQuery {
                 code: 1,
                 log: format!("Error running query: {e}"),
                 info: format!("Error running query: {e}"),
                 ..Default::default()
-            },
+            };
+        }
+
+        abci::ResponseQuery {
+            value: bincode::serialize(&query_result.unwrap()).unwrap(),
+            ..Default::default()
         }
     }
 
@@ -271,28 +282,28 @@ impl SnarkVMApp {
 
     /// Fail if the same record appears more than once as a function input in the transaction.
     fn check_no_duplicate_records(&self, transaction: &Transaction) -> Result<()> {
-        let commitments = transaction.origin_commitments();
-        if let Some(commitment) = commitments.iter().duplicates().next() {
+        let serial_numbers = transaction.record_serial_numbers();
+        if let Some(serial_number) = serial_numbers.iter().duplicates().next() {
             bail!(
                 "input record commitment {} in transaction {} is duplicate",
-                commitment,
+                serial_number,
                 transaction.id()
             );
         }
         Ok(())
     }
 
-    /// the transaction should be rejected if it's input records don't exist
+    /// the transaction should be rejected if its input records don't exist
     /// or they aren't known to be unspent either in the ledger or in an unconfirmed transaction output
     fn check_inputs_are_unspent(&self, transaction: &Transaction) -> Result<()> {
-        let commitments = transaction.origin_commitments();
-        let already_spent = commitments
+        let serial_numbers = transaction.record_serial_numbers();
+        let already_spent = serial_numbers
             .iter()
-            .find(|commitment| !self.records.is_unspent(commitment).unwrap_or(true));
-        if let Some(commitment) = already_spent {
+            .find(|serial_number| !self.records.is_unspent(serial_number).unwrap_or(true));
+        if let Some(serial_number) = already_spent {
             bail!(
-                "input record commitment {} is unknown or already spent",
-                commitment
+                "input record serial number {} is unknown or already spent",
+                serial_number
             )
         }
         Ok(())
@@ -302,9 +313,9 @@ impl SnarkVMApp {
     /// but it's assumed the that was validated before as to prevent half-applied transactions in the block.
     fn spend_input_records(&self, transaction: &Transaction) -> Result<()> {
         transaction
-            .origin_commitments()
+            .record_serial_numbers()
             .iter()
-            .map(|commitment| self.records.spend(commitment))
+            .map(|serial_number| self.records.spend(serial_number))
             .find(|result| result.is_err())
             .unwrap_or(Ok(()))
     }
