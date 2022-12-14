@@ -5,7 +5,7 @@ use itertools::Itertools;
 use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
-use lib::{vm, jaleo};
+use lib::{jaleo, vm};
 use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
@@ -240,7 +240,10 @@ impl Command {
                             .iter()
                             .filter(|record| {
                                 let mut address = [0_u8; 63];
-                                for (address_byte, primitive_address_byte) in address.iter_mut().zip(credentials.address.to_string().as_bytes()) {
+                                for (address_byte, primitive_address_byte) in address
+                                    .iter_mut()
+                                    .zip(credentials.address.to_string().as_bytes())
+                                {
                                     *address_byte = *primitive_address_byte;
                                 }
                                 record.is_owner(&address, &credentials.view_key)
@@ -326,7 +329,11 @@ fn parse_input_value(input: &str) -> Result<vm::SimpleworksValueType> {
 
     // try parsing a jsonified plaintext record
     if let Ok(record) = serde_json::from_str::<jaleo::JAleoRecord>(input) {
-        return Ok(vm::SimpleworksValueType::Record { owner: record.owner, gates: record.gates, entries: record.entries });
+        return Ok(vm::SimpleworksValueType::Record {
+            owner: record.owner,
+            gates: record.gates,
+            entries: record.entries,
+        });
     }
     // otherwise fallback to parsing a snarkvm literal
     vm::SimpleworksValueType::try_from(input.to_string())
@@ -364,9 +371,8 @@ async fn get_records(
                 .decrypt(&credentials.view_key)
                 .map(|decrypted_record| (commitment, ciphertext, decrypted_record))
                 .ok()
-                .filter(|(commitment, _, decrypted_record)| {
-                    let serial_number =
-                        decrypted_record.serial_number(&credentials.private_key);
+                .filter(|(_, _, decrypted_record)| {
+                    let serial_number = decrypted_record.serial_number(&credentials.private_key);
                     serial_number.is_ok() & spent_records.contains(&serial_number.unwrap())
                 })
         })
@@ -390,8 +396,16 @@ async fn choose_fee_record(
     }
     let amount = amount.unwrap();
 
-    if let Some(vm::SimpleworksValueType::Record { owner, gates, entries }) = record {
-        return Ok(Some((amount, jaleo::JAleoRecord::new(*owner, *gates, entries.clone()))));
+    if let Some(vm::SimpleworksValueType::Record {
+        owner,
+        gates,
+        entries,
+    }) = record
+    {
+        return Ok(Some((
+            amount,
+            jaleo::JAleoRecord::new(*owner, *gates, entries.clone()),
+        )));
     }
 
     let account_records: Vec<jaleo::JAleoRecord> = get_records(credentials, url)
@@ -416,7 +430,12 @@ fn select_default_fee_record(
     let input_records: HashSet<String> = inputs
         .iter()
         .filter_map(|value| {
-            if let vm::SimpleworksValueType::Record { owner, gates, entries } = value {
+            if let vm::SimpleworksValueType::Record {
+                owner,
+                gates,
+                entries,
+            } = value
+            {
                 Some(jaleo::JAleoRecord::new(*owner, *gates, entries.clone()).to_string())
             } else {
                 None
@@ -476,9 +495,16 @@ mod tests {
         assert_eq!(record6, result);
 
         // if one record but also input, fail
-        let error =
-            select_default_fee_record(5, &[vm::SimpleworksValueType::Record { owner: record6.owner, gates: record6.gates, entries: record6.entries }], &[record6.clone()])
-                .unwrap_err();
+        let error = select_default_fee_record(
+            5,
+            &[vm::SimpleworksValueType::Record {
+                owner: record6.owner,
+                gates: record6.gates,
+                entries: record6.entries.clone(),
+            }],
+            &[record6.clone()],
+        )
+        .unwrap_err();
         assert_eq!(
             "there are not records with enough credits for a 5 gates fee",
             error.to_string()
@@ -495,14 +521,22 @@ mod tests {
 
         let result = select_default_fee_record(
             5,
-            &[vm::SimpleworksValueType::Record { owner: record10.owner, gates: record10.gates, entries: record10.entries }],
+            &[vm::SimpleworksValueType::Record {
+                owner: record10.owner,
+                gates: record10.gates,
+                entries: record10.entries.clone(),
+            }],
             &[record5, record10, record6.clone()],
         )
         .unwrap();
         assert_eq!(record6, result);
     }
 
-    fn mint_record(address: &jaleo::Address, view_key: &jaleo::ViewKey, amount: u64) -> jaleo::JAleoRecord {
+    fn mint_record(
+        address: &jaleo::Address,
+        view_key: &jaleo::ViewKey,
+        amount: u64,
+    ) -> jaleo::JAleoRecord {
         jaleo::mint_credits(address, amount)
             .unwrap()
             .1
