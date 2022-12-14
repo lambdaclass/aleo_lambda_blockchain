@@ -13,7 +13,7 @@ use snarkvm::{
     console::types::string::Integer,
     prelude::{
         Balance, CallStack, Environment, FromBytes, Itertools, Literal, Network, One, Owner,
-        Plaintext, Testnet3, ToField, Uniform, I64,
+        Plaintext, Testnet3, ToBits, ToField, Uniform, I64,
     },
 };
 
