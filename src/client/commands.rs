@@ -183,7 +183,7 @@ impl Command {
                     let fee =
                         choose_fee_record(&credentials, &url, &fee, &fee_record, &inputs).await?;
                     let transaction = Transaction::execution(
-                        Some(&path),
+                        &path,
                         function,
                         &inputs,
                         &credentials.private_key,
@@ -199,8 +199,7 @@ impl Command {
                     let fee =
                         choose_fee_record(&credentials, &url, &fee_amount, &fee_record, &inputs)
                             .await?;
-                    let transaction = Transaction::execution(
-                        None,
+                    let transaction = Transaction::credits_execution(
                         credits.identifier()?,
                         &inputs,
                         &credentials.private_key,

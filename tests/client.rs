@@ -71,7 +71,7 @@ fn program_validations() {
     // fail on unknown function
     let error =
         execute_program(home_path, &program_path, UNKNOWN_PROGRAM, &["1u32", "1u32"]).unwrap_err();
-    assert!(error.contains("\\\"Function \\'unknown\\' does not exist."));
+    assert!(error.contains("does not exist"));
 
     // fail on missing parameter
     let error = execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32"]).unwrap_err();
@@ -216,6 +216,7 @@ fn consume_records() {
 
     // execute consume with same output record, execution fails, no double spend
     let error = execute_program(home_path, &program_path, CONSUME_FUNCTION, &[record]).unwrap_err();
+
     assert!(error.contains("is unknown or already spent"));
 
     // create a fake record
@@ -232,7 +233,8 @@ fn consume_records() {
     // execute with made output record, execution fails, no use unknown record
     let error =
         execute_program(home_path, &program_path, CONSUME_FUNCTION, &[&record]).unwrap_err();
-    assert!(error.contains("Invalid value"));
+
+    assert!(error.contains("must belong to the signer") || error.contains("Invalid value"));
 }
 
 #[test]

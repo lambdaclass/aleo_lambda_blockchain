@@ -29,11 +29,11 @@ impl Transaction {
         fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
         let program_string = fs::read_to_string(path)?;
-        let program = vm::generate_program(&program_string)?;
         debug!("Deploying program {}", program_string);
-
-        let mut rng = rand::thread_rng();
-        let verifying_keys = vm::generate_verifying_keys(&program, &mut rng)?;
+        let program = vm::generate_program(&program_string)?;
+        let verifying_keys = vm::generate_verifying_keys(&program)?;
+        // using a uuid for txid, just to skip having to use an additional fee record which now is necessary to run
+        // Transaction::from_deployment
         let id = uuid::Uuid::new_v4().to_string();
         let fee = Self::execute_fee(private_key, fee, 0)?;
         Ok(Transaction::Deployment {
@@ -46,21 +46,59 @@ impl Transaction {
 
     // Used to generate an execution of a program in path or an execution of the credits program
     pub fn execution(
-        path: Option<&Path>,
+        path: &Path,
         function_name: vm::Identifier,
         inputs: &[vm::Value],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
+        let program_string = fs::read_to_string(path).unwrap();
+        let program: vm::Program = vm::generate_program(&program_string)?;
+        let rng = &mut rand::thread_rng();
+        let (proving_key, _) = vm::synthesize_keys(&program, rng, &function_name)?;
+
         let rng = &mut rand::thread_rng();
 
-        let mut transitions = if let Some(path) = path {
-            let program_string = fs::read_to_string(path)?;
+        let mut transitions = vm::execution(
+            program,
+            function_name,
+            inputs,
+            private_key,
+            rng,
+            proving_key,
+        )?;
 
-            vm::generate_execution(&program_string, function_name, inputs, private_key, rng)?
-        } else {
-            vm::credits_execution(function_name, inputs, private_key, rng)?
-        };
+        // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
+        // subtracted from the fees that were requested to be paid.
+        let implicit_fees = transitions.iter().map(|transition| transition.fee()).sum();
+        if let Some(transition) = Self::execute_fee(private_key, requested_fee, implicit_fees)? {
+            transitions.push(transition);
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+
+        Ok(Self::Execution { id, transitions })
+    }
+
+    pub fn credits_execution(
+        function_name: vm::Identifier,
+        inputs: &[vm::Value],
+        private_key: &vm::PrivateKey,
+        requested_fee: Option<(u64, vm::Record)>,
+    ) -> Result<Self> {
+        let (proving_key, _) = vm::get_credits_key(&function_name)?;
+        let program = vm::Program::credits()?;
+
+        let rng = &mut rand::thread_rng();
+
+        let mut transitions = vm::execution(
+            program,
+            function_name,
+            inputs,
+            private_key,
+            rng,
+            proving_key,
+        )?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -140,7 +178,6 @@ impl Transaction {
         requested_fee: Option<(u64, vm::Record)>,
         implicit_fee: i64,
     ) -> Result<Option<vm::Transition>> {
-        let mut rng = rand::thread_rng();
         if let Some((gates, record)) = requested_fee {
             ensure!(
                 implicit_fee >= 0,
@@ -158,7 +195,19 @@ impl Transaction {
                 vm::Value::Record(record),
                 vm::Value::from_str(&format!("{gates}u64"))?,
             ];
-            let transitions = vm::credits_execution(fee_function, &inputs, private_key, &mut rng)?;
+
+            let rng = &mut rand::thread_rng();
+
+            let (proving_key, _) = vm::get_credits_key(&fee_function)?;
+            let program = vm::Program::credits()?;
+            let transitions = vm::execution(
+                program,
+                fee_function,
+                &inputs,
+                private_key,
+                rng,
+                proving_key,
+            )?;
             Ok(Some(transitions.first().unwrap().clone()))
         } else {
             Ok(None)
