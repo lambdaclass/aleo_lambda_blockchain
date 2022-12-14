@@ -1,7 +1,8 @@
 use crate::{account, tendermint};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use itertools::Itertools;
+use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
 use lib::vm;
@@ -112,6 +113,12 @@ pub enum Program {
         #[clap(long, value_parser=parse_input_record)]
         fee_record: Option<vm::Value>,
     },
+    /// Builds an .aleo program's keys and saves them to an .avm file
+    Build {
+        /// Path to the .aleo program to build
+        #[clap(value_parser)]
+        path: PathBuf,
+    },
 }
 
 /// Return the status of a Transaction: Type, whether it is committed to the ledger, and the program name.
@@ -139,6 +146,9 @@ impl Command {
                 account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
 
             match self {
+                Command::Account(Account::New) => {
+                    bail!("this shouldn't be reachable, the account new is a special case handled elsewhere")
+                }
                 Command::Account(Account::Balance) => {
                     let balance = get_records(&credentials, &url)
                         .await?
@@ -193,6 +203,12 @@ impl Command {
                     tendermint::broadcast(transaction_serialized, &url).await?;
                     json!(transaction)
                 }
+                Command::Program(Program::Build { path }) => {
+                    let program_file = ProgramFile::build(&path)?;
+                    let output_path = path.with_extension("avm");
+                    program_file.save(&output_path)?;
+                    json!({ "path": output_path })
+                }
                 Command::Credits(credits) => {
                     let inputs = credits.inputs();
                     let (fee_amount, fee_record) = credits.fee();
@@ -234,7 +250,6 @@ impl Command {
                         })
                     }
                 }
-                _ => json!("unknown command"),
             }
         };
 

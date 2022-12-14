@@ -31,9 +31,13 @@ impl Transaction {
         let program_string = fs::read_to_string(path)?;
         debug!("Deploying program {}", program_string);
         let program = vm::generate_program(&program_string)?;
-        let verifying_keys = vm::generate_verifying_keys(&program)?;
-        // using a uuid for txid, just to skip having to use an additional fee record which now is necessary to run
-        // Transaction::from_deployment
+
+        // generate program keys (proving and verifying) and keep the verifying one for the deploy
+        let verifying_keys = vm::synthesize_program_keys(&program)?
+            .into_iter()
+            .map(|(i, keys)| (i, keys.1))
+            .collect();
+
         let id = uuid::Uuid::new_v4().to_string();
         let fee = Self::execute_fee(private_key, fee, 0)?;
         Ok(Transaction::Deployment {
@@ -55,10 +59,8 @@ impl Transaction {
         let program_string = fs::read_to_string(path).unwrap();
         let program: vm::Program = vm::generate_program(&program_string)?;
         let rng = &mut rand::thread_rng();
-        let (proving_key, _) = vm::synthesize_keys(&program, rng, &function_name)?;
 
-        let rng = &mut rand::thread_rng();
-
+        let (proving_key, _) = vm::synthesize_function_keys(&program, rng, &function_name)?;
         let mut transitions = vm::execution(
             program,
             function_name,

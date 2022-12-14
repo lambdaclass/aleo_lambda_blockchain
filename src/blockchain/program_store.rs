@@ -196,11 +196,13 @@ mod tests {
         let program_string = fs::read_to_string(program_path).unwrap();
         let program = vm::generate_program(&program_string)?;
 
-        program_store.add(
-            program.id(),
-            &program,
-            &vm::generate_verifying_keys(&program)?,
-        )?;
+        // generate program keys (proving and verifying) and keep the verifying one for the store
+        let keys = vm::synthesize_program_keys(&program)?
+            .into_iter()
+            .map(|(i, (_, verifying_key))| (i, verifying_key))
+            .collect();
+
+        program_store.add(program.id(), &program, &keys)?;
 
         Ok(program)
     }

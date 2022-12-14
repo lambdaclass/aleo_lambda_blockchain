@@ -40,6 +40,7 @@ pub type ProvingKey = snarkvm::prelude::ProvingKey<Testnet3>;
 pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Transition = snarkvm::prelude::Transition<Testnet3>;
 pub type VerifyingKeyMap = IndexMap<Identifier, VerifyingKey>;
+pub type KeyPairMap = IndexMap<Identifier, (ProvingKey, VerifyingKey)>;
 
 /// Basic deployment validations
 pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> Result<()> {
@@ -170,29 +171,24 @@ pub fn verify_execution(transition: &Transition, verifying_keys: &VerifyingKeyMa
     Ok(())
 }
 
-// these struct-level functions should probably not be in the Vm level
-pub fn generate_verifying_keys(program: &Program) -> Result<VerifyingKeyMap> {
-    // NOTE: we're skipping the part of imported programs
-    // https://github.com/Entropy1729/snarkVM/blob/2c4e282df46ed71c809fd4b49738fd78562354ac/vm/package/deploy.rs#L149
-
-    let mut verifying_keys = VerifyingKeyMap::new();
+/// Generate proving and verifying keys for each function in the given program,
+/// and return them in a function name -> (proving key, verifying key) map.
+pub fn synthesize_program_keys(program: &Program) -> Result<KeyPairMap> {
+    let mut verifying_keys = IndexMap::new();
 
     for function_name in program.functions().keys() {
         let rng = &mut rand::thread_rng();
-        let (_, verifying_key) = synthesize_keys(program, rng, function_name)?;
-        verifying_keys.insert(*function_name, verifying_key);
+        verifying_keys.insert(
+            *function_name,
+            synthesize_function_keys(program, rng, function_name)?,
+        );
     }
 
     Ok(verifying_keys)
 }
 
-// Generates a program deployment for source transactions
-pub fn generate_program(program_string: &str) -> Result<Program> {
-    // Verify program is valid by parsing it and returning it
-    Program::from_str(program_string)
-}
-
-pub fn synthesize_keys(
+/// Generate proving and verifying keys for the given function.
+pub fn synthesize_function_keys(
     program: &Program,
     rng: &mut ThreadRng,
     function_name: &Identifier,
@@ -207,6 +203,12 @@ pub fn synthesize_keys(
         verifying_key.ok_or_else(|| anyhow!("verifying key not found for identifier"))?;
 
     Ok((proving_key, verifying_key))
+}
+
+// Generates a program deployment for source transactions
+pub fn generate_program(program_string: &str) -> Result<Program> {
+    // Verify program is valid by parsing it and returning it
+    Program::from_str(program_string)
 }
 
 pub fn execution(
