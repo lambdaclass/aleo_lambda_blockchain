@@ -103,7 +103,8 @@ impl RecordStore {
                     }
                     Command::IsUnspent(serial_number, reply_to) => {
                         // TODO: [related to above] handle record existence scenarios
-                        let is_unspent = !spent_buffer.contains_key(&serial_number);
+                        let is_unspent = !key_exists_or_fails(&db_spent, &serial_number)
+                                            && !spent_buffer.contains_key(&serial_number);
                         reply_to
                             .send(is_unspent)
                             .unwrap_or_else(|e| error!("{}", e));
@@ -260,9 +261,10 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
     !matches!(db.get(key), Ok(None))
 }
 
-// TODO: Update and review tests with serial number changes in mind
 #[cfg(test)]
 mod tests {
+    use lib::vm::{PrivateKey, self};
+    use serde::ser;
     use snarkvm::prelude::{Identifier, Network, ProgramID, Testnet3, Uniform};
 
     use super::*;
@@ -287,9 +289,8 @@ mod tests {
     #[test]
     fn add_and_spend_record() {
         let store = RecordStore::new(&db_path("records1")).unwrap();
-        let (record, serial_number) = new_record();
-
-        store.add(serial_number, record).unwrap();
+        let (record, commitment, serial_number) = new_record();
+        store.add(commitment, record).unwrap();
         assert!(store.is_unspent(&serial_number).unwrap());
         store.commit().unwrap();
         assert!(store.is_unspent(&serial_number).unwrap());
@@ -298,8 +299,8 @@ mod tests {
         store.commit().unwrap();
         assert!(!store.is_unspent(&serial_number).unwrap());
 
-        let msg = store
-            .spend(&serial_number)
+        let msg = store.
+            spend(&serial_number)
             .unwrap_err()
             .root_cause()
             .to_string();
@@ -313,25 +314,25 @@ mod tests {
     fn no_double_add_record() {
         let store = RecordStore::new(&db_path("records2")).unwrap();
 
-        let (record, serial_number) = new_record();
-        store.add(serial_number, record.clone()).unwrap();
+        let (record, commitment, _) = new_record();
+        store.add(commitment, record.clone()).unwrap();
         let msg = store
-            .add(serial_number, record)
+            .add(commitment, record)
             .unwrap_err()
             .root_cause()
             .to_string();
-        assert_eq!(format!("record {serial_number} already exists"), msg);
+        assert_eq!(format!("record {commitment} already exists"), msg);
         store.commit().unwrap();
 
-        let (record, serial_number) = new_record();
-        store.add(serial_number, record.clone()).unwrap();
+        let (record, commitment, _) = new_record();
+        store.add(commitment, record.clone()).unwrap();
         store.commit().unwrap();
         let msg = store
-            .add(serial_number, record)
+            .add(commitment, record)
             .unwrap_err()
             .root_cause()
             .to_string();
-        assert_eq!(format!("record {serial_number} already exists"), msg);
+        assert_eq!(format!("record {commitment} already exists"), msg);
 
         // FIXME patching rocksdb weird behavior
         std::mem::forget(store);
@@ -341,8 +342,8 @@ mod tests {
     fn spend_before_commit() {
         let store = RecordStore::new(&db_path("records3")).unwrap();
 
-        let (record, serial_number) = new_record();
-        store.add(serial_number, record).unwrap();
+        let (record, commitment, serial_number) = new_record();
+        store.add(commitment, record).unwrap();
         assert!(store.is_unspent(&serial_number).unwrap());
         store.spend(&serial_number).unwrap();
         assert!(!store.is_unspent(&serial_number).unwrap());
@@ -358,23 +359,22 @@ mod tests {
         let store = RecordStore::new(&db_path("records4")).unwrap();
 
         // add, commit, spend, commit, fail spend
-        let (record, serial_number) = new_record();
-        store.add(serial_number, record).unwrap();
+        let (record, commitment, serial_number) = new_record();
+        store.add(commitment, record).unwrap();
         store.commit().unwrap();
         assert!(store.is_unspent(&serial_number).unwrap());
         store.spend(&serial_number).unwrap();
         store.commit().unwrap();
         assert!(!store.is_unspent(&serial_number).unwrap());
-        let msg = store
-            .spend(&serial_number)
+        let msg =  store.spend(&serial_number)
             .unwrap_err()
             .root_cause()
             .to_string();
         assert_eq!("record already spent", msg);
 
         // add, commit, spend, fail spend, commit, fail spend
-        let (record, serial_number) = new_record();
-        store.add(serial_number, record).unwrap();
+        let (record, commitment, serial_number) = new_record();
+        store.add(commitment, record).unwrap();
         store.commit().unwrap();
         assert!(store.is_unspent(&serial_number).unwrap());
         store.spend(&serial_number).unwrap();
@@ -394,8 +394,8 @@ mod tests {
         assert_eq!("record already spent", msg);
 
         // add, spend, fail spend, commit
-        let (record, serial_number) = new_record();
-        store.add(serial_number, record).unwrap();
+        let (record, commitment, serial_number) = new_record();
+        store.add(commitment, record).unwrap();
         store.spend(&serial_number).unwrap();
         let msg = store
             .spend(&serial_number)
@@ -410,37 +410,24 @@ mod tests {
         std::mem::forget(store);
     }
 
-    #[test]
-    fn no_spend_unknown() {
-        // create record but don't add it
-        let store = RecordStore::new(&db_path("records5")).unwrap();
-        let (_record, serial_number) = new_record();
+    // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record 
 
-        // when it's unknown it's "not unspent"
-        assert!(!store.is_unspent(&serial_number).unwrap());
-
-        let msg = store
-            .spend(&serial_number)
-            .unwrap_err()
-            .root_cause()
-            .to_string();
-        assert_eq!("record doesn't exist", msg);
-
-        // FIXME patching rocksdb weird behavior
-        std::mem::forget(store);
-    }
-
-    fn new_record() -> (EncryptedRecord, SerialNumber) {
+    fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
         let rng = &mut rand::thread_rng();
         let randomizer = Uniform::rand(rng);
         let nonce = Testnet3::g_scalar_multiply(&randomizer);
         let record = PublicRecord::from_str(
-            &format!("{{ owner: aleo1d5hg2z3ma00382pngntdp68e74zv54jdxy249qhaujhks9c72yrs33ddah.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {nonce}.public }}"),
+            &format!("{{ owner: aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {nonce}.public }}"),
         ).unwrap();
         let program_id = ProgramID::from_str("foo.aleo").unwrap();
         let name = Identifier::from_str("bar").unwrap();
         let commitment = record.to_commitment(&program_id, &name).unwrap();
         let record_ciphertext = record.encrypt(randomizer).unwrap();
-        (record_ciphertext, commitment)
+        
+        // compute serial number to check for spending status
+        let pk = PrivateKey::from_str("APrivateKey1zkpCT3zCj49nmVoeBXa21EGLjTUc7AKAcMNKLXzP7kc4cgx").unwrap();
+        let serial_number = vm::compute_serial_number(pk, commitment.clone()).unwrap();
+        
+        (record_ciphertext, commitment, serial_number)
     }
 }

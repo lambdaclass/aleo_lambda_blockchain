@@ -10,6 +10,7 @@ pub enum AbciQuery {
 
 impl From<AbciQuery> for Vec<u8> {
     fn from(q: AbciQuery) -> Vec<u8>{
+        // bincoding an enum should not fail ever so unwrap() here should be fine
         bincode::serialize(&q).unwrap()
     }
 }

@@ -7,8 +7,10 @@ use lib::transaction::Transaction;
 use lib::vm;
 use log::debug;
 use serde_json::json;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::vec;
 
 #[derive(Debug, Parser)]
@@ -270,10 +272,10 @@ async fn get_records(
 ) -> Result<Vec<(vm::Field, vm::EncryptedRecord, vm::Record)>> {
     let get_records_response = tendermint::query(AbciQuery::GetRecords.into(), url).await?;
     let get_spent_records_response = tendermint::query(AbciQuery::GetSpentSerialNumbers.into(), url).await?;
- 
-    // TODO: cross-check serial numbers generated from records with get_spent_records_response
 
     let records: Vec<(vm::Field, vm::EncryptedRecord)> = bincode::deserialize(&get_records_response)?;
+    let spent_records: HashSet<vm::Field> = bincode::deserialize(&get_spent_records_response)?;
+
     debug!("Records: {:?}", records);
     let records = records
         .into_iter()
@@ -282,6 +284,11 @@ async fn get_records(
                 .decrypt(&credentials.view_key)
                 .map(|decrypted_record| (commitment, ciphertext, decrypted_record))
                 .ok()
+                .filter(|(commitment, _, _)| {
+                    let serial_number = vm::compute_serial_number(credentials.private_key, commitment.clone());
+                    serial_number.is_ok() & spent_records.contains(&serial_number.unwrap())
+                }
+                )
         })
         .collect();
     Ok(records)
