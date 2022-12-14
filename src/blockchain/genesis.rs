@@ -5,7 +5,7 @@ use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use anyhow::Result;
 use clap::Parser;
-use lib::{vm, GenesisState};
+use lib::{GenesisState, jaleo};
 
 /// Takes a list of node directories and updates the genesis files on each of them
 /// to include records to assign default credits to each validator and a mapping
@@ -38,7 +38,7 @@ fn main() -> Result<()> {
         let aleo_account_path = node_dir.join("account.json");
         let aleo_account: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(aleo_account_path)?)?;
-        let aleo_address = vm::Address::from_str(aleo_account["address"].as_str().unwrap())?;
+        let aleo_address = jaleo::Address::from_str(aleo_account["address"].as_str().unwrap())?;
 
         let tmint_account_path = node_dir.join("config/priv_validator_key.json");
         let tmint_account: serde_json::Value =
@@ -49,8 +49,7 @@ fn main() -> Result<()> {
 
         println!("Generating record for {aleo_address}");
         // NOTE: using a hardcoded seed, not for production!
-        let seed = 123;
-        let record = vm::mint_credits(&aleo_address, cli.amount, seed)?;
+        let record = jaleo::mint_credits(&aleo_address, cli.amount)?;
         genesis_records.push(record);
     }
 
