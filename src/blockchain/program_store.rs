@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
-use lib::vm::{self, Program, ProgramID, VerifyingKeyMap};
+use indexmap::IndexMap;
+use lib::jaleo::{self, Program, ProgramID, VerifyingKeyMap};
 use log::{debug, error};
 use std::str::FromStr;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
@@ -123,14 +124,14 @@ impl ProgramStore {
             Ok(())
         } else {
             debug!("Loading credits.aleo as part of Program Store initialization");
-            let mut key_map = VerifyingKeyMap::new();
+            let mut key_map = IndexMap::new();
 
             for function_name in credits_program.functions().keys() {
-                let (_, verifying_key) = vm::get_credits_key(function_name)?;
-                key_map.insert(*function_name, verifying_key);
+                let (_, verifying_key) = jaleo::get_credits_key(function_name)?;
+                key_map.insert(function_name.to_string(), verifying_key);
             }
 
-            self.add(credits_program.id(), &credits_program, &key_map)
+            self.add(credits_program.id(), &credits_program, &VerifyingKeyMap { map: key_map })
         }
     }
 }
@@ -138,7 +139,7 @@ impl ProgramStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lib::vm::{self, Program};
+    use lib::{jaleo, vm};
     use std::{fs, str::FromStr};
 
     #[ctor::ctor]
@@ -190,19 +191,23 @@ mod tests {
         assert!(store.exists(program.id()));
     }
 
-    fn store_program(program_store: &ProgramStore, path: &str) -> Result<vm::Program> {
+    fn store_program(program_store: &ProgramStore, path: &str) -> Result<jaleo::Program> {
         let program_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
 
         let program_string = fs::read_to_string(program_path).unwrap();
-        let program = vm::generate_program(&program_string)?;
 
         // generate program keys (proving and verifying) and keep the verifying one for the store
-        let keys = vm::synthesize_program_keys(&program)?
+        let (program, program_build) = vm::build_program(&program_string)?;
+
+        let keys = program_build
+            .map
             .into_iter()
             .map(|(i, (_, verifying_key))| (i, verifying_key))
             .collect();
 
-        program_store.add(program.id(), &program, &keys)?;
+        let verifying_keys = VerifyingKeyMap { map: keys };
+            
+        program_store.add(program.id(), &program, &verifying_keys)?;
 
         Ok(program)
     }
