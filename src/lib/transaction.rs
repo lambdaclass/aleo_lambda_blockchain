@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use vm::jaleo::{VerifyingKey, VerifyingKeyMap};
+use vm::jaleo::{VerifyingKey, VerifyingKeyMap, Record};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Transaction {
@@ -27,7 +27,7 @@ impl Transaction {
     pub fn deployment(
         path: &Path,
         private_key: &jaleo::PrivateKey,
-        fee: Option<(u64, jaleo::JAleoRecord)>,
+        fee: Option<(u64, jaleo::Record)>,
     ) -> Result<Self> {
         let program_string = fs::read_to_string(path)?;
         debug!("Deploying program {}", program_string);
@@ -57,9 +57,9 @@ impl Transaction {
     pub fn execution(
         path: &Path,
         function_name: jaleo::Identifier,
-        inputs: &[vm::SimpleworksValueType],
+        inputs: &[jaleo::UserInputValueType],
         private_key: &jaleo::PrivateKey,
-        requested_fee: Option<(u64, jaleo::JAleoRecord)>,
+        requested_fee: Option<(u64, jaleo::Record)>,
     ) -> Result<Self> {
         let program_string = fs::read_to_string(path).unwrap();
         let program = jaleo::generate_program(&program_string)?;
@@ -80,9 +80,9 @@ impl Transaction {
 
     pub fn credits_execution(
         function_name: jaleo::Identifier,
-        inputs: &[vm::SimpleworksValueType],
+        inputs: &[jaleo::UserInputValueType],
         private_key: &jaleo::PrivateKey,
-        requested_fee: Option<(u64, jaleo::JAleoRecord)>,
+        requested_fee: Option<(u64, jaleo::Record)>,
     ) -> Result<Self> {
         let program = jaleo::Program::credits()?;
 
@@ -108,7 +108,7 @@ impl Transaction {
         }
     }
 
-    pub fn output_records(&self) -> Vec<jaleo::JAleoRecord> {
+    pub fn output_records(&self) -> Vec<jaleo::Record> {
         self.transitions()
             .iter()
             .flat_map(|transition| transition.output_records())
@@ -156,7 +156,7 @@ impl Transaction {
     /// to produce a difference between the input/output records of its transition.
     fn execute_fee(
         private_key: &jaleo::PrivateKey,
-        requested_fee: Option<(u64, jaleo::JAleoRecord)>,
+        requested_fee: Option<(u64, jaleo::Record)>,
         implicit_fee: i64,
     ) -> Result<Option<jaleo::Transition>> {
         if let Some((gates, record)) = requested_fee {
@@ -173,14 +173,14 @@ impl Transaction {
             let gates = gates as i64 - implicit_fee;
             let fee_function = jaleo::Identifier::from_str("fee")?;
             let inputs = [
-                vm::SimpleworksValueType::Record {
+                jaleo::UserInputValueType::Record(Record {
                     owner: record.owner,
                     gates: record.gates,
                     entries: record.entries,
                     nonce: record.nonce,
-                },
+                }),
                 // TODO: Revisit the cast below.
-                vm::SimpleworksValueType::U64(gates as u64),
+                jaleo::UserInputValueType::U64(gates as u64),
             ];
 
             let rng = &mut vm::generate_rand();

@@ -19,7 +19,7 @@ type Value = Vec<u8>;
 /// Internal channel reply for the scan command
 type ScanReply = (Vec<(Key, Value)>, Option<Key>);
 /// Public return type for the scan command.
-type ScanResult = (Vec<(Commitment, jaleo::JAleoRecord)>, Option<SerialNumber>);
+type ScanResult = (Vec<(Commitment, jaleo::Record)>, Option<SerialNumber>);
 
 /// The record store tracks the known unspent and spent record sets (similar to bitcoin's UTXO set)
 /// according to the transactions that are committed to the ledger.
@@ -180,7 +180,7 @@ impl RecordStore {
     }
 
     /// Saves a new unspent record to the write buffer
-    pub fn add(&self, commitment: Commitment, record: jaleo::JAleoRecord) -> Result<()> {
+    pub fn add(&self, commitment: Commitment, record: jaleo::Record) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         let commitment = commitment.into_bytes();
@@ -236,7 +236,7 @@ impl RecordStore {
             .map(|(commitment, record)| {
                 let commitment =
                     Commitment::from_str(&String::from_utf8_lossy(commitment)).unwrap();
-                let record: jaleo::JAleoRecord =
+                let record: jaleo::Record =
                     serde_json::from_str(&String::from_utf8_lossy(record)).unwrap();
                 (commitment, record)
             })
@@ -270,7 +270,7 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 
 //     use super::*;
 //     use std::{fs, str::FromStr};
-//     type PublicRecord = lib::jaleo::JAleoRecord;
+//     type PublicRecord = lib::jaleo::Record;
 
 //     #[ctor::ctor]
 //     fn init() {
@@ -414,7 +414,7 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 
 //     // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
 
-//     fn new_record() -> (jaleo::JAleoRecord, Commitment, SerialNumber) {
+//     fn new_record() -> (jaleo::Record, Commitment, SerialNumber) {
 //         let rng = &mut rand::thread_rng();
 //         let randomizer = Uniform::rand(rng);
 //         let nonce = Testnet3::g_scalar_multiply(&randomizer);
