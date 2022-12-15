@@ -186,6 +186,7 @@ impl Transaction {
                     owner: record.owner,
                     gates: record.gates,
                     entries: record.entries,
+                    nonce: record.nonce,
                 },
                 // TODO: Revisit the cast below.
                 vm::SimpleworksValueType::U64(gates as u64),
