@@ -10,7 +10,6 @@ use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use std::vec;
 
@@ -402,7 +401,7 @@ async fn choose_fee_record(
         owner,
         gates,
         entries,
-        nonce: nonce,
+        nonce,
     }) = record
     {
         return Ok(Some((
@@ -437,7 +436,7 @@ fn select_default_fee_record(
                 owner,
                 gates,
                 entries,
-                nonce: nonce,
+                nonce,
             } = value
             {
                 Some(
