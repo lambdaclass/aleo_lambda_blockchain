@@ -57,9 +57,8 @@ indexmap = "1.9.2"
 itertools = "0.10.5"
 
 [dependencies.vmtropy]
-# git = "https://github.com/Entropy1729/snarkVM.git"
-# branch = "integration"
-path = "../VMtropy"
+git = "https://github.com/Entropy1729/VMtropy.git"
+branch = "integration"
 
 [dev-dependencies]
 assert_fs = "1.0.9"
