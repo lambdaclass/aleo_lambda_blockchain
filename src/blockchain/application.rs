@@ -83,7 +83,7 @@ impl Application for SnarkVMApp {
                 // https://trello.com/c/bP8Nbs7C/170-handle-record-querying-properly-in-recordstore
                 self.records
                     .scan(None, None)
-                    .map(|result| bincode::serialize(&result.0).unwrap())
+                    .map(|result| bincode::serialize(&result).unwrap())
             }
             AbciQuery::GetSpentSerialNumbers => {
                 info!("Fetching spent records's serial numbers");
@@ -104,7 +104,7 @@ impl Application for SnarkVMApp {
         }
 
         abci::ResponseQuery {
-            value: bincode::serialize(&query_result.unwrap()).unwrap(),
+            value: query_result.unwrap(),
             ..Default::default()
         }
     }
@@ -286,7 +286,7 @@ impl SnarkVMApp {
         let serial_numbers = transaction.record_serial_numbers();
         if let Some(serial_number) = serial_numbers.iter().duplicates().next() {
             bail!(
-                "input record commitment {} in transaction {} is duplicate",
+                "record with serial number {} in transaction {} is duplicate",
                 serial_number,
                 transaction.id()
             );

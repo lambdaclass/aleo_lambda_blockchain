@@ -10,6 +10,7 @@ use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use std::vec;
 
@@ -350,7 +351,7 @@ pub fn parse_input_record(input: &str) -> Result<vm::SimpleworksValueType> {
 }
 
 /// Retrieves all records from the blockchain, and only those that are correctly decrypted
-/// (i.e, are owned by the passed credentials) are returned
+/// (i.e, are owned by the passed credentials) and have not been spent are returned
 async fn get_records(
     credentials: &account::Credentials,
     url: &str,

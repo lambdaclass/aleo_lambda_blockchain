@@ -115,15 +115,6 @@ impl Transaction {
             .collect()
     }
 
-    /// If the transaction is an execution, return the list of input record origins
-    /// (in case they are record commitments).
-    pub fn origin_commitments(&self) -> Vec<jaleo::Field> {
-        self.transitions()
-            .iter()
-            .flat_map(|transition| transition.origins())
-            .collect()
-    }
-
     /// If the transaction is an execution, return the list of input record serial numbers
     pub fn record_serial_numbers(&self) -> Vec<jaleo::Field> {
         self.transitions()
