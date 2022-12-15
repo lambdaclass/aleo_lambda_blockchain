@@ -126,8 +126,8 @@ impl ProgramStore {
             debug!("Loading credits.aleo as part of Program Store initialization");
             let mut key_map = IndexMap::new();
 
-            for function_name in credits_program.functions().keys() {
-                let (_, verifying_key) = jaleo::get_credits_key(function_name)?;
+            for (function_name, function) in credits_program.functions() {
+                let (_, verifying_key) = jaleo::get_credits_key(function)?;
                 key_map.insert(function_name.to_string(), verifying_key);
             }
 
