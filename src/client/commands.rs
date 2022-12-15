@@ -334,6 +334,7 @@ fn parse_input_value(input: &str) -> Result<vm::SimpleworksValueType> {
             owner: record.owner,
             gates: record.gates,
             entries: record.entries,
+            nonce: record.nonce,
         });
     }
     // otherwise fallback to parsing a snarkvm literal
@@ -401,11 +402,12 @@ async fn choose_fee_record(
         owner,
         gates,
         entries,
+        nonce: nonce,
     }) = record
     {
         return Ok(Some((
             amount,
-            jaleo::JAleoRecord::new(*owner, *gates, entries.clone()),
+            jaleo::JAleoRecord::new(*owner, *gates, entries.clone(), Some(*nonce)),
         )));
     }
 
@@ -435,9 +437,13 @@ fn select_default_fee_record(
                 owner,
                 gates,
                 entries,
+                nonce: nonce,
             } = value
             {
-                Some(jaleo::JAleoRecord::new(*owner, *gates, entries.clone()).to_string())
+                Some(
+                    jaleo::JAleoRecord::new(*owner, *gates, entries.clone(), Some(*nonce))
+                        .to_string(),
+                )
             } else {
                 None
             }
@@ -502,6 +508,7 @@ mod tests {
                 owner: record6.owner,
                 gates: record6.gates,
                 entries: record6.entries.clone(),
+                nonce: record6.nonce,
             }],
             &[record6.clone()],
         )
@@ -526,6 +533,7 @@ mod tests {
                 owner: record10.owner,
                 gates: record10.gates,
                 entries: record10.entries.clone(),
+                nonce: record10.nonce,
             }],
             &[record5, record10, record6.clone()],
         )
