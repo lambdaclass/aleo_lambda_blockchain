@@ -1,19 +1,25 @@
 use anyhow::{anyhow, Result};
-use lib::vm::{EncryptedRecord, Field as Commitment};
+use lib::vm::{EncryptedRecord, Field};
 use log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
 
+// because both serial numbers and Commitments are really fields, define types to differentiate them
+type SerialNumber = Field;
+type Commitment = Field;
+
+// TODO: Key and Value types should be concrete types instead of serialized data like in
+// program store, so that type errors bubble up asap (ie from the interaction with the DB)
 type Key = Vec<u8>;
 type Value = Vec<u8>;
 
 /// Internal channel reply for the scan command
 type ScanReply = (Vec<(Key, Value)>, Option<Key>);
 /// Public return type for the scan command.
-type ScanResult = (Vec<(Commitment, EncryptedRecord)>, Option<Commitment>);
+type ScanResult = (Vec<(Commitment, EncryptedRecord)>, Option<SerialNumber>);
 
 /// The record store tracks the known unspent and spent record sets (similar to bitcoin's UTXO set)
 /// according to the transactions that are committed to the ledger.
@@ -32,7 +38,8 @@ enum Command {
     Spend(Key, SyncSender<Result<()>>),
     IsUnspent(Key, SyncSender<bool>),
     Commit,
-    Scan {
+    ScanSpentRecords(SyncSender<HashSet<SerialNumber>>),
+    ScanRecords {
         from: Option<Key>,
         limit: Option<usize>,
         reply_sender: SyncSender<ScanReply>,
@@ -46,18 +53,18 @@ impl RecordStore {
         // https://github.com/EighteenZi/rocksdb_wiki/blob/master/Column-Families.md
         // we may also like to try something other than rocksdb here, e.g. sqlite
 
-        // DB to track unspent record commitments and ciphertexts. These come from execution outputs and can be used as inputs in the future.
-        let db_unspent = rocksdb::DB::open_default(format!("{path}.unspent.db"))?;
+        // TODO: comment on this
+        let db_records = rocksdb::DB::open_default(format!("{path}.records.db"))?;
 
-        // DB to track spent record commitments and ciphertexts. These are tracked to ensure that records aren't spent more than once
+        // DB to track spent record serial_numbers. These are tracked to ensure that records aren't spent more than once
         // (without having to _know_ the actual record contents).
         let db_spent = rocksdb::DB::open_default(format!("{path}.spent.db"))?;
 
         // map to store temporary unspent record additions until a block is comitted.
-        let mut buffer_unspent = HashMap::new();
+        let mut record_buffer = HashMap::new();
 
         // map to store temporary spent record additions until a block is comitted.
-        let mut buffer_spent = HashMap::new();
+        let mut spent_buffer = HashMap::new();
 
         let (command_sender, command_receiver): (Sender<Command>, Receiver<Command>) = channel();
 
@@ -65,82 +72,71 @@ impl RecordStore {
             while let Ok(command) = command_receiver.recv() {
                 match command {
                     Command::Add(commitment, ciphertext, reply_to) => {
-                        let result = if buffer_unspent.contains_key(&commitment)
-                            || buffer_spent.contains_key(&commitment)
-                            || key_exists_or_fails(&db_unspent, &commitment)
-                            || key_exists_or_fails(&db_spent, &commitment)
+                        // TODO: Remove/change this into something secure (merkle path to valid records exists)
+                        // Because tracking existence and spent status leads to security concerns, existence of records will
+                        // have to be proven by the execution. Until this is implemented, return Ok by default here and assume the record exists.
+                        let result = if record_buffer.contains_key(&commitment)
+                            || key_exists_or_fails(&db_records, &commitment)
                         {
                             Err(anyhow!(
                                 "record {} already exists",
                                 String::from_utf8_lossy(&commitment)
                             ))
                         } else {
-                            buffer_unspent.insert(commitment, ciphertext);
+                            record_buffer.insert(commitment, ciphertext);
                             Ok(())
                         };
-
                         reply_to.send(result).unwrap_or_else(|e| error!("{}", e));
                     }
-                    Command::Spend(commitment, reply_to) => {
-                        let result = if key_exists_or_fails(&db_spent, &commitment)
-                            || buffer_spent.contains_key(&commitment)
+                    Command::Spend(serial_number, reply_to) => {
+                        // TODO: [related to above] implement record existence check and handle case where it exists and it doesn't
+                        let result = if key_exists_or_fails(&db_spent, &serial_number)
+                            || spent_buffer.contains_key(&serial_number)
                         {
                             Err(anyhow!("record already spent"))
-                        } else if let Some(value) = buffer_unspent.get(&commitment) {
-                            // NOTE: this assumes it's valid to spend an output from an unconfirmed transaction.
-                            buffer_spent.insert(commitment, value.clone());
-                            Ok(())
-                        } else if let Some(value) = db_unspent.get(&commitment).unwrap_or(None) {
-                            buffer_spent.insert(commitment, value.clone());
-                            Ok(())
                         } else {
-                            Err(anyhow!("record doesn't exist"))
+                            spent_buffer.insert(serial_number, "1".as_bytes());
+                            Ok(())
                         };
 
                         reply_to.send(result).unwrap_or_else(|e| error!("{}", e));
                     }
-                    Command::IsUnspent(commitment, reply_to) => {
-                        let is_unspent = (key_exists_or_fails(&db_unspent, &commitment)
-                            || buffer_unspent.contains_key(&commitment))
-                            && !buffer_spent.contains_key(&commitment);
+                    Command::IsUnspent(serial_number, reply_to) => {
+                        // TODO: [related to above] handle record existence scenarios
+                        let is_unspent = !key_exists_or_fails(&db_spent, &serial_number)
+                            && !spent_buffer.contains_key(&serial_number);
                         reply_to
                             .send(is_unspent)
                             .unwrap_or_else(|e| error!("{}", e));
                     }
                     Command::Commit => {
-                        // remove all buffer spent from buffer unspent, i.e. record generated and consumed in the same block
-                        for key in buffer_spent.keys() {
-                            buffer_unspent.remove(key);
-                        }
-
-                        // add all buffer spent to db spent, i.e. persisted consumed records
+                        // add new records to store
                         let mut batch = WriteBatch::default();
-                        for (key, value) in buffer_spent.iter() {
-                            batch.put(key.clone(), value.clone());
+                        for (key, value) in record_buffer.iter() {
+                            batch.put(key, value);
                         }
-                        db_spent
+                        db_records
                             .write(batch)
                             .unwrap_or_else(|e| error!("failed to write to db {}", e));
 
-                        // add remaining buffer unspent to db unspent, i.e. persist available records
+                        // add all buffer spent to db spent, i.e. persisted consumed records (as a serial number for security)
                         let mut batch = WriteBatch::default();
-                        for (key, value) in buffer_unspent.iter() {
-                            batch.put(key, value);
+                        for (key, value) in spent_buffer.iter() {
+                            batch.put(key.clone(), value);
                         }
-                        db_unspent
+
+                        db_spent
                             .write(batch)
                             .unwrap_or_else(|e| error!("failed to write to db {}", e));
 
                         // remove all buffer spent from db unspent, i.e. consumed records should only be kept in spent db
                         let mut batch = WriteBatch::default();
-                        for key in buffer_spent.keys() {
+                        for key in spent_buffer.keys() {
                             batch.delete(key);
                         }
-                        db_unspent
-                            .write(batch)
-                            .unwrap_or_else(|e| error!("failed to write to db {}", e));
+                        spent_buffer.clear();
                     }
-                    Command::Scan {
+                    Command::ScanRecords {
                         from,
                         limit,
                         reply_sender: reply_to,
@@ -150,7 +146,7 @@ impl RecordStore {
                         });
                         let mut records = vec![];
                         let mut last_key = None;
-                        for item in db_unspent.iterator(iterator_mode) {
+                        for item in db_records.iterator(iterator_mode) {
                             if limit.map_or(false, |l| records.len() >= l) {
                                 break;
                             }
@@ -161,6 +157,20 @@ impl RecordStore {
                         }
                         reply_to
                             .send((records, last_key))
+                            .unwrap_or_else(|e| error!("{}", e));
+                    }
+                    Command::ScanSpentRecords(reply_sender) => {
+                        let spent_records = db_spent
+                            .iterator(IteratorMode::Start)
+                            .filter_map(|s| {
+                                s.map(|(k, _)| {
+                                    SerialNumber::from_str(&String::from_utf8_lossy(&k)).unwrap()
+                                })
+                                .ok()
+                            })
+                            .collect();
+                        reply_sender
+                            .send(spent_records)
                             .unwrap_or_else(|e| error!("{}", e));
                     }
                 };
@@ -183,12 +193,12 @@ impl RecordStore {
 
     /// Marks a record as spent in the write buffer.
     /// Fails if the record is not found or was already spent.
-    pub fn spend(&self, commitment: &Commitment) -> Result<()> {
+    pub fn spend(&self, serial_number: &SerialNumber) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
-        let commitment = commitment.to_string().into_bytes();
+        let serial_number = serial_number.to_string().into_bytes();
         self.command_sender
-            .send(Command::Spend(commitment, reply_sender))?;
+            .send(Command::Spend(serial_number, reply_sender))?;
         reply_receiver.recv()?
     }
 
@@ -197,22 +207,22 @@ impl RecordStore {
         Ok(self.command_sender.send(Command::Commit)?)
     }
 
-    /// Returns whether a record by the given commitment is known and not spent
-    pub fn is_unspent(&self, commitment: &Commitment) -> Result<bool> {
+    /// Returns whether a record by the given serial_number is known and not spent
+    pub fn is_unspent(&self, serial_number: &SerialNumber) -> Result<bool> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
-        let commitment = commitment.to_string().into_bytes();
+        let serial_number = serial_number.to_string().into_bytes();
         self.command_sender
-            .send(Command::IsUnspent(commitment, reply_sender))?;
+            .send(Command::IsUnspent(serial_number, reply_sender))?;
         Ok(reply_receiver.recv()?)
     }
 
-    /// Given an account view key, return up to `limit` record ciphertexts
-    pub fn scan(&self, from: Option<Commitment>, limit: Option<usize>) -> Result<ScanResult> {
+    /// Return up to `limit` record ciphertexts
+    pub fn scan(&self, from: Option<SerialNumber>, limit: Option<usize>) -> Result<ScanResult> {
         let from = from.map(|commitment| commitment.to_string().into_bytes());
         let (reply_sender, reply_receiver) = sync_channel(0);
 
-        self.command_sender.send(Command::Scan {
+        self.command_sender.send(Command::ScanRecords {
             from,
             limit,
             reply_sender,
@@ -232,6 +242,18 @@ impl RecordStore {
             .collect();
         Ok((results, last_key))
     }
+
+    // TODO: implement way of limiting response size/count or optimization for better scaling
+    /// Return all serial numbers
+    pub fn scan_spent(&self) -> Result<HashSet<SerialNumber>> {
+        let (reply_sender, reply_receiver) = sync_channel(0);
+
+        self.command_sender
+            .send(Command::ScanSpentRecords(reply_sender))?;
+
+        let results = reply_receiver.recv()?;
+        Ok(results)
+    }
 }
 
 /// TODO explain the need for this
@@ -241,6 +263,8 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use lib::vm::{self, PrivateKey};
+
     use snarkvm::prelude::{Identifier, Network, ProgramID, Testnet3, Uniform};
 
     use super::*;
@@ -265,19 +289,18 @@ mod tests {
     #[test]
     fn add_and_spend_record() {
         let store = RecordStore::new(&db_path("records1")).unwrap();
-        let (record, commitment) = new_record();
-
+        let (record, commitment, serial_number) = new_record();
         store.add(commitment, record).unwrap();
-        assert!(store.is_unspent(&commitment).unwrap());
+        assert!(store.is_unspent(&serial_number).unwrap());
         store.commit().unwrap();
-        assert!(store.is_unspent(&commitment).unwrap());
-        store.spend(&commitment).unwrap();
-        assert!(!store.is_unspent(&commitment).unwrap());
+        assert!(store.is_unspent(&serial_number).unwrap());
+        store.spend(&serial_number).unwrap();
+        assert!(!store.is_unspent(&serial_number).unwrap());
         store.commit().unwrap();
-        assert!(!store.is_unspent(&commitment).unwrap());
+        assert!(!store.is_unspent(&serial_number).unwrap());
 
         let msg = store
-            .spend(&commitment)
+            .spend(&serial_number)
             .unwrap_err()
             .root_cause()
             .to_string();
@@ -291,7 +314,7 @@ mod tests {
     fn no_double_add_record() {
         let store = RecordStore::new(&db_path("records2")).unwrap();
 
-        let (record, commitment) = new_record();
+        let (record, commitment, _) = new_record();
         store.add(commitment, record.clone()).unwrap();
         let msg = store
             .add(commitment, record)
@@ -301,7 +324,7 @@ mod tests {
         assert_eq!(format!("record {commitment} already exists"), msg);
         store.commit().unwrap();
 
-        let (record, commitment) = new_record();
+        let (record, commitment, _) = new_record();
         store.add(commitment, record.clone()).unwrap();
         store.commit().unwrap();
         let msg = store
@@ -319,13 +342,13 @@ mod tests {
     fn spend_before_commit() {
         let store = RecordStore::new(&db_path("records3")).unwrap();
 
-        let (record, commitment) = new_record();
+        let (record, commitment, serial_number) = new_record();
         store.add(commitment, record).unwrap();
-        assert!(store.is_unspent(&commitment).unwrap());
-        store.spend(&commitment).unwrap();
-        assert!(!store.is_unspent(&commitment).unwrap());
+        assert!(store.is_unspent(&serial_number).unwrap());
+        store.spend(&serial_number).unwrap();
+        assert!(!store.is_unspent(&serial_number).unwrap());
         store.commit().unwrap();
-        assert!(!store.is_unspent(&commitment).unwrap());
+        assert!(!store.is_unspent(&serial_number).unwrap());
 
         // FIXME patching rocksdb weird behavior
         std::mem::forget(store);
@@ -336,89 +359,78 @@ mod tests {
         let store = RecordStore::new(&db_path("records4")).unwrap();
 
         // add, commit, spend, commit, fail spend
-        let (record, commitment) = new_record();
+        let (record, commitment, serial_number) = new_record();
         store.add(commitment, record).unwrap();
         store.commit().unwrap();
-        assert!(store.is_unspent(&commitment).unwrap());
-        store.spend(&commitment).unwrap();
+        assert!(store.is_unspent(&serial_number).unwrap());
+        store.spend(&serial_number).unwrap();
         store.commit().unwrap();
-        assert!(!store.is_unspent(&commitment).unwrap());
+        assert!(!store.is_unspent(&serial_number).unwrap());
         let msg = store
-            .spend(&commitment)
+            .spend(&serial_number)
             .unwrap_err()
             .root_cause()
             .to_string();
         assert_eq!("record already spent", msg);
 
         // add, commit, spend, fail spend, commit, fail spend
-        let (record, commitment) = new_record();
+        let (record, commitment, serial_number) = new_record();
         store.add(commitment, record).unwrap();
         store.commit().unwrap();
-        assert!(store.is_unspent(&commitment).unwrap());
-        store.spend(&commitment).unwrap();
+        assert!(store.is_unspent(&serial_number).unwrap());
+        store.spend(&serial_number).unwrap();
         let msg = store
-            .spend(&commitment)
+            .spend(&serial_number)
             .unwrap_err()
             .root_cause()
             .to_string();
         assert_eq!("record already spent", msg);
         store.commit().unwrap();
-        assert!(!store.is_unspent(&commitment).unwrap());
+        assert!(!store.is_unspent(&serial_number).unwrap());
         let msg = store
-            .spend(&commitment)
+            .spend(&serial_number)
             .unwrap_err()
             .root_cause()
             .to_string();
         assert_eq!("record already spent", msg);
 
         // add, spend, fail spend, commit
-        let (record, commitment) = new_record();
+        let (record, commitment, serial_number) = new_record();
         store.add(commitment, record).unwrap();
-        store.spend(&commitment).unwrap();
+        store.spend(&serial_number).unwrap();
         let msg = store
-            .spend(&commitment)
+            .spend(&serial_number)
             .unwrap_err()
             .root_cause()
             .to_string();
         assert_eq!("record already spent", msg);
         store.commit().unwrap();
-        assert!(!store.is_unspent(&commitment).unwrap());
+        assert!(!store.is_unspent(&serial_number).unwrap());
 
         // FIXME patching rocksdb weird behavior
         std::mem::forget(store);
     }
 
-    #[test]
-    fn no_spend_unknown() {
-        // create record but don't add it
-        let store = RecordStore::new(&db_path("records5")).unwrap();
-        let (_record, commitment) = new_record();
+    // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
 
-        // when it's unknown it's "not unspent"
-        assert!(!store.is_unspent(&commitment).unwrap());
-
-        let msg = store
-            .spend(&commitment)
-            .unwrap_err()
-            .root_cause()
-            .to_string();
-        assert_eq!("record doesn't exist", msg);
-
-        // FIXME patching rocksdb weird behavior
-        std::mem::forget(store);
-    }
-
-    fn new_record() -> (EncryptedRecord, Commitment) {
+    fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
         let rng = &mut rand::thread_rng();
         let randomizer = Uniform::rand(rng);
         let nonce = Testnet3::g_scalar_multiply(&randomizer);
         let record = PublicRecord::from_str(
-            &format!("{{ owner: aleo1d5hg2z3ma00382pngntdp68e74zv54jdxy249qhaujhks9c72yrs33ddah.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {nonce}.public }}"),
+            &format!("{{ owner: aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {nonce}.public }}"),
         ).unwrap();
         let program_id = ProgramID::from_str("foo.aleo").unwrap();
         let name = Identifier::from_str("bar").unwrap();
         let commitment = record.to_commitment(&program_id, &name).unwrap();
         let record_ciphertext = record.encrypt(randomizer).unwrap();
-        (record_ciphertext, commitment)
+
+        // compute serial number to check for spending status
+        let pk =
+            PrivateKey::from_str("APrivateKey1zkpCT3zCj49nmVoeBXa21EGLjTUc7AKAcMNKLXzP7kc4cgx")
+                .unwrap();
+        let serial_number = vm::compute_serial_number(pk, commitment).unwrap();
+
+        (record_ciphertext, commitment, serial_number)
     }
 }

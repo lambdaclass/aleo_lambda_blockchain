@@ -269,6 +269,7 @@ The diagram below describes the current architecture of the system:
 * Tendermint core handles the basic functions of a blockchain: p2p networking, receiving transactions and relying them to peers, running a consensus algorithm to propose and vote for blocks and keeping a ledger of committed transactions.
 * The application tracks application-specific logic and state. The state is derived from the transactions seen by the node (in our case, the set of spent and unspent records, and the deployed program certificates). The logic includes validating the execution transactions by verifying their proofs.
 * The application is isolated from the outer world and communicates exclusively with the tendermint process through specific hooks of the Application Blockchain Interface (abci). For example: the `CheckTx` hook is used to validate transactions before putting them in the local mempool and relaying them to the peers, the `DeliverTx` writes application state changes derived from transactions included in a block and the `Commit` hook applies those changes when the block is committed to the ledger.
+* The ABCI application contains two components related to maintaining the state of the blockchain network: The program store and the record store. As their names imply, they are in charge of persisting and retrieveing programs that have been committed by users and keeping track of records and their spending status respectively.
 
 These interactions between tendermint core and the application are depicted below:
 
@@ -283,6 +284,11 @@ TODO execution sequence diagram
 
 ## Implementation notes
 
+*  The record store contains a DB of all existing records (essentially outputrecords, with ciphertexts and commitments from executions), and a DB of spentrecords. Keeping track of the existence of records (along with their spentstatus) by using commitments is a security concern since it reveals data byenabling the possibility of linking records to users. Because of this, there is aneed to track spending status of records by using their serial numbers(essentially records 'signed' by the user's private key used as inputs ofexecutions). 
+    *  This means that getting records owned by a user is not trivial since we need to get all records and produce serial numbers to cross-check with thespent serial number DB.
+    * Because we track the existence of records by their commitments and there is no way for the blockchain to relate them to a serial number, the current implementation does not enforce that the serial number that is an input on an execution does actually exist and is valid (for now, it is assumed to exist always). In order to solve this, there needs to be a proof included that shows that there is a valid merkle path to a record used as an input (currently not implemented).
+
+### Reference link
 * [ABCI overview](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview)
 * [About why app hash is needed](https://github.com/tendermint/tendermint/issues/1179). Also [this](https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/apps.md#query-proofs).
 * [Prioritized mempool discussion](https://github.com/tendermint/tendermint/discussions/9772).

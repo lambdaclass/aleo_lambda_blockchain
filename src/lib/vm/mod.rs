@@ -13,7 +13,7 @@ use snarkvm::{
     console::types::string::Integer,
     prelude::{
         Balance, CallStack, Environment, FromBytes, Itertools, Literal, Network, One, Owner,
-        Plaintext, Testnet3, ToField, Uniform, I64,
+        Plaintext, Testnet3, ToBits, ToField, Uniform, I64,
     },
 };
 
@@ -294,4 +294,22 @@ pub fn get_credits_key(function_name: &Identifier) -> Result<(ProvingKey, Verify
 /// Extract the record gates (the minimal credits unit) as a u64 integer, instead of a snarkvm internal type.
 pub fn gates(record: &Record) -> u64 {
     *record.gates().deref().deref()
+}
+
+/// A helper method to derive the serial number from the private key and commitment.
+pub fn compute_serial_number(private_key: PrivateKey, commitment: Field) -> Result<Field> {
+    // Compute the generator `H` as `HashToGroup(commitment)`.
+    let h = Testnet3::hash_to_group_psd2(&[Testnet3::serial_number_domain(), commitment])?;
+    // Compute `gamma` as `sk_sig * H`.
+    let gamma = h * private_key.sk_sig();
+    // Compute `sn_nonce` as `Hash(COFACTOR * gamma)`.
+    let sn_nonce = Testnet3::hash_to_scalar_psd2(&[
+        Testnet3::serial_number_domain(),
+        gamma.mul_by_cofactor().to_x_coordinate(),
+    ])?;
+    // Compute `serial_number` as `Commit(commitment, sn_nonce)`.
+    Testnet3::commit_bhp512(
+        &(Testnet3::serial_number_domain(), commitment).to_bits_le(),
+        &sn_nonce,
+    )
 }

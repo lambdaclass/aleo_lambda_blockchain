@@ -128,19 +128,11 @@ impl Transaction {
             .collect()
     }
 
-    /// If the transaction is an execution, return the list of input record origins
-    /// (in case they are record commitments).
-    pub fn origin_commitments(&self) -> Vec<vm::Field> {
+    /// If the transaction is an execution, return the list of input record serial numbers
+    pub fn record_serial_numbers(&self) -> Vec<vm::Field> {
         self.transitions()
             .iter()
-            .flat_map(|transition| transition.origins())
-            .filter_map(|origin| {
-                if let vm::Origin::Commitment(commitment) = origin {
-                    Some(*commitment)
-                } else {
-                    None
-                }
-            })
+            .flat_map(|transition| transition.serial_numbers().cloned())
             .collect()
     }
 
