@@ -255,6 +255,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Check with consensus team"]
     fn rewards_are_deterministic() {
         // create 2 different validators with the same amounts
         let tmint1 = "7407FC3F3E2F8EEEB77A22CA245EFC66B6D1DC1D";

@@ -262,14 +262,11 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
     !matches!(db.get(key), Ok(None))
 }
 
-// FIXME: copy tests from main branch.
 // #[cfg(test)]
 // mod tests {
-//     use lib::jaleo::{Identifier, ProgramID, PrivateKey};
-//     use vmtropy::snarkvm::prelude::{Uniform, Testnet3, Network};
+//     use std::fs;
 
 //     use super::*;
-//     use std::{fs, str::FromStr};
 //     type PublicRecord = lib::jaleo::Record;
 
 //     #[ctor::ctor]
@@ -414,7 +411,7 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 
 //     // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
 
-//     fn new_record() -> (jaleo::Record, Commitment, SerialNumber) {
+//     fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
 //         let rng = &mut rand::thread_rng();
 //         let randomizer = Uniform::rand(rng);
 //         let nonce = Testnet3::g_scalar_multiply(&randomizer);
