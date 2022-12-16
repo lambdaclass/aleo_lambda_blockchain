@@ -10,6 +10,7 @@ use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use lib::jaleo::EncryptedRecord;
 
 use std::vec;
 
@@ -339,13 +340,11 @@ fn parse_input_value(input: &str) -> Result<jaleo::UserInputValueType> {
 }
 
 pub fn parse_input_record(input: &str) -> Result<jaleo::UserInputValueType> {
-    // let ciphertext = vm::EncryptedRecord::from_str(input)?;
-    // let credentials = account::Credentials::load()?;
-    // ciphertext
-    //     .decrypt(&credentials.view_key)
-    //     .map(jaleo::UserInputValueType::Record)
-
-    jaleo::UserInputValueType::try_from(input.to_string())
+    let ciphertext : EncryptedRecord = serde_json::from_str(input)?;
+    let credentials = account::Credentials::load()?;
+    ciphertext
+        .decrypt(&credentials.view_key)
+        .map(jaleo::UserInputValueType::Record)
 }
 
 /// Retrieves all records from the blockchain, and only those that are correctly decrypted
