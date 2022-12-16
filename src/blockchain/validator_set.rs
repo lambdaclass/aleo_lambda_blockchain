@@ -171,6 +171,7 @@ impl ValidatorSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lib::vm;
 
     #[ctor::dtor]
     fn shutdown() {
@@ -360,13 +361,10 @@ mod tests {
         rewards
             .iter()
             .filter(|(_, record)| {
-                let mut address = [0_u8; 63];
-                let primitive_address = owner.1.to_string();
-                for (address_byte, primitive_address_byte) in
-                    address.iter_mut().zip(primitive_address.as_bytes())
-                {
-                    *address_byte = *primitive_address_byte
-                }
+                // The above turns a snarkVM address into an address that is
+                // useful for the vm. This should change a little when we support
+                // our own addresses.
+                let address = vm::helpers::to_address(owner.1.to_string());
                 record.is_owner(&address, &owner.0)
             })
             .fold(0, |acc, (_, record)| {

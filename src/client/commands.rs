@@ -5,7 +5,7 @@ use itertools::Itertools;
 use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
-use lib::jaleo;
+use lib::{jaleo, vm};
 use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
@@ -239,13 +239,10 @@ impl Command {
                             .output_records()
                             .iter()
                             .filter(|record| {
-                                let mut address = [0_u8; 63];
-                                for (address_byte, primitive_address_byte) in address
-                                    .iter_mut()
-                                    .zip(credentials.address.to_string().as_bytes())
-                                {
-                                    *address_byte = *primitive_address_byte;
-                                }
+                                // The above turns a snarkVM address into an address that is
+                                // useful for the vm. This should change a little when we support
+                                // our own addresses.
+                                let address = vm::helpers::to_address(credentials.address.to_string());
                                 record.is_owner(&address, &credentials.view_key)
                             })
                             .filter_map(|record| record.decrypt(&credentials.view_key).ok())
