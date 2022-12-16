@@ -108,7 +108,7 @@ impl Transaction {
         }
     }
 
-    pub fn output_records(&self) -> Vec<jaleo::Record> {
+    pub fn output_records(&self) -> Vec<jaleo::EncryptedRecord> {
         self.transitions()
             .iter()
             .flat_map(|transition| transition.output_records())

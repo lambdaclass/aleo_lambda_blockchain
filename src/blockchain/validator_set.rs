@@ -105,7 +105,7 @@ impl ValidatorSet {
     /// weighted by their voting power (which is assumed to be proportional to its stake).
     /// If there are credits left because of rounding errors when dividing by voting power,
     /// they are assigned to the proposer.
-    pub fn rewards(&self) -> Vec<(jaleo::Field, jaleo::Record)> {
+    pub fn rewards(&self) -> Vec<(jaleo::Field, jaleo::EncryptedRecord)> {
         if let Some(proposer) = &self.current_proposer {
             // first calculate which part of the total belongs to voters
             let voter_reward_percentage = 100 - PROPOSER_REWARD_PERCENTAGE;
@@ -356,7 +356,7 @@ mod tests {
 
     fn decrypt_rewards(
         owner: &(jaleo::ViewKey, jaleo::Address),
-        rewards: &[(jaleo::Field, jaleo::Record)],
+        rewards: &[(jaleo::Field, jaleo::EncryptedRecord)],
     ) -> u64 {
         rewards
             .iter()

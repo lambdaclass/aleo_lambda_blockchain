@@ -19,7 +19,7 @@ type Value = Vec<u8>;
 /// Internal channel reply for the scan command
 type ScanReply = (Vec<(Key, Value)>, Option<Key>);
 /// Public return type for the scan command.
-type ScanResult = (Vec<(Commitment, jaleo::Record)>, Option<SerialNumber>);
+type ScanResult = (Vec<(Commitment, jaleo::EncryptedRecord)>, Option<SerialNumber>);
 
 /// The record store tracks the known unspent and spent record sets (similar to bitcoin's UTXO set)
 /// according to the transactions that are committed to the ledger.
@@ -180,7 +180,7 @@ impl RecordStore {
     }
 
     /// Saves a new unspent record to the write buffer
-    pub fn add(&self, commitment: Commitment, record: jaleo::Record) -> Result<()> {
+    pub fn add(&self, commitment: Commitment, record: jaleo::EncryptedRecord) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         let commitment = commitment.into_bytes();
@@ -236,7 +236,7 @@ impl RecordStore {
             .map(|(commitment, record)| {
                 let commitment =
                     Commitment::from_str(&String::from_utf8_lossy(commitment)).unwrap();
-                let record: jaleo::Record =
+                let record: jaleo::EncryptedRecord =
                     serde_json::from_str(&String::from_utf8_lossy(record)).unwrap();
                 (commitment, record)
             })

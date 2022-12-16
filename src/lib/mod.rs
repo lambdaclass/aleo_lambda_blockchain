@@ -11,6 +11,6 @@ pub use vmtropy as vm;
 
 #[derive(Deserialize, Serialize)]
 pub struct GenesisState {
-    pub records: Vec<(jaleo::Field, jaleo::Record)>,
+    pub records: Vec<(jaleo::Field, jaleo::EncryptedRecord)>,
     pub validators: HashMap<String, jaleo::Address>,
 }
