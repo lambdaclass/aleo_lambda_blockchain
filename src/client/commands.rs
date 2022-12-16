@@ -242,7 +242,8 @@ impl Command {
                                 // The above turns a snarkVM address into an address that is
                                 // useful for the vm. This should change a little when we support
                                 // our own addresses.
-                                let address = vm::helpers::to_address(credentials.address.to_string());
+                                let address =
+                                    vm::helpers::to_address(credentials.address.to_string());
                                 record.is_owner(&address, &credentials.view_key)
                             })
                             .filter_map(|record| record.decrypt(&credentials.view_key).ok())
@@ -357,8 +358,7 @@ async fn get_records(
     let get_spent_records_response =
         tendermint::query(AbciQuery::GetSpentSerialNumbers.into(), url).await?;
 
-    let records: Vec<(jaleo::Field, jaleo::Record)> =
-        bincode::deserialize(&get_records_response)?;
+    let records: Vec<(jaleo::Field, jaleo::Record)> = bincode::deserialize(&get_records_response)?;
     let spent_records: HashSet<jaleo::Field> = bincode::deserialize(&get_spent_records_response)?;
 
     debug!("Records: {:?}", records);
@@ -436,10 +436,7 @@ fn select_default_fee_record(
                 nonce,
             }) = value
             {
-                Some(
-                    jaleo::Record::new(*owner, *gates, entries.clone(), Some(*nonce))
-                        .to_string(),
-                )
+                Some(jaleo::Record::new(*owner, *gates, entries.clone(), Some(*nonce)).to_string())
             } else {
                 None
             }

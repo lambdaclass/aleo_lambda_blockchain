@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use vm::jaleo::{VerifyingKey, VerifyingKeyMap, Record};
+use vm::jaleo::{Record, VerifyingKey, VerifyingKeyMap};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Transaction {
