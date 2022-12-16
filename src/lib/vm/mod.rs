@@ -12,12 +12,10 @@ use snarkvm::{
     circuit::AleoV0,
     console::types::string::Integer,
     prelude::{
-        Balance, CallStack, Environment, FromBytes, Itertools, Literal, Network, One, Owner,
-        Plaintext, Testnet3, ToBits, ToField, Uniform, I64,
+        Balance, CallStack, Environment, Itertools, Literal, Network, One, Owner, Plaintext,
+        Testnet3, ToBits, ToField, Uniform, I64,
     },
 };
-
-use snarkvm::parameters;
 
 mod stack;
 
@@ -252,11 +250,14 @@ pub fn execution(
     Ok(execution.into_transitions().collect())
 }
 
-/// Generate a credits record of the given amount for the given owner,
+/// Generate a record for a specific program with the given attributes,
 /// by using the given seed to deterministically generate a nonce.
-pub fn mint_credits(
+/// This could be replaced by a more user-friendly record constructor.
+pub fn mint_record(
+    program_id: &str,
+    record_name: &str,
     owner_address: &Address,
-    credits: u64,
+    gates: u64,
     seed: u64,
 ) -> Result<(Field, EncryptedRecord)> {
     // TODO have someone verify/audit this, probably it's unsafe or breaks cryptographic assumptions
@@ -265,7 +266,7 @@ pub fn mint_credits(
         Literal::Address(*owner_address),
         Default::default(),
     ));
-    let amount = Integer::new(credits);
+    let amount = Integer::new(gates);
     let gates = Balance::Private(Plaintext::Literal(Literal::U64(amount), Default::default()));
     let empty_data = IndexMap::new();
 
@@ -274,21 +275,11 @@ pub fn mint_credits(
     let nonce = Testnet3::g_scalar_multiply(&randomizer);
 
     let public_record = Record::from_plaintext(owner, gates, empty_data, nonce)?;
-    let record_name = Identifier::from_str("credits")?;
-    let commitment = public_record.to_commitment(Program::credits()?.id(), &record_name)?;
+    let record_name = Identifier::from_str(record_name)?;
+    let program_id = ProgramID::from_str(program_id)?;
+    let commitment = public_record.to_commitment(&program_id, &record_name)?;
     let encrypted_record = public_record.encrypt(randomizer)?;
     Ok((commitment, encrypted_record))
-}
-
-pub fn get_credits_key(function_name: &Identifier) -> Result<(ProvingKey, VerifyingKey)> {
-    let (prov_key, ver_key) = parameters::testnet3::TESTNET3_CREDITS_PROGRAM
-        .get(&function_name.to_string())
-        .ok_or_else(|| anyhow!("Circuit keys for credits.aleo/{function_name}' not found"))?;
-
-    let ver_key = VerifyingKey::from_bytes_le(ver_key)?;
-    let prov_key = ProvingKey::from_bytes_le(prov_key)?;
-
-    Ok((prov_key, ver_key))
 }
 
 /// Extract the record gates (the minimal credits unit) as a u64 integer, instead of a snarkvm internal type.

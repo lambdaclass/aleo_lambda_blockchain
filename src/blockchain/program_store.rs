@@ -1,13 +1,12 @@
 use anyhow::{anyhow, Result};
-use lib::vm::{self, Program, ProgramID, VerifyingKeyMap};
+use lib::vm;
 use log::{debug, error};
-use std::str::FromStr;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
 
-pub type StoredProgram = (Program, VerifyingKeyMap);
+pub type StoredProgram = (vm::Program, vm::VerifyingKeyMap);
 
-type Key = ProgramID;
+type Key = vm::ProgramID;
 type Value = StoredProgram;
 
 /// The program store tracks programs that have been deployed to the OS
@@ -77,7 +76,7 @@ impl ProgramStore {
     }
 
     /// Returns a program
-    pub fn get(&self, program_id: &ProgramID) -> Result<Option<StoredProgram>> {
+    pub fn get(&self, program_id: &vm::ProgramID) -> Result<Option<StoredProgram>> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender
@@ -89,9 +88,9 @@ impl ProgramStore {
     /// Adds a program to the store
     pub fn add(
         &self,
-        program_id: &ProgramID,
-        program: &Program,
-        verifying_keys: &VerifyingKeyMap,
+        program_id: &vm::ProgramID,
+        program: &vm::Program,
+        verifying_keys: &vm::VerifyingKeyMap,
     ) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
@@ -105,7 +104,7 @@ impl ProgramStore {
     }
 
     /// Returns whether a program ID is already stored
-    pub fn exists(&self, program_id: &ProgramID) -> bool {
+    pub fn exists(&self, program_id: &vm::ProgramID) -> bool {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender
@@ -116,19 +115,17 @@ impl ProgramStore {
     }
 
     fn load_credits(&self) -> Result<()> {
-        let credits_program = Program::credits()?;
+        let (credits_program, keys) = lib::load_credits();
 
-        if self.exists(&ProgramID::from_str("credits.aleo")?) {
+        if self.exists(credits_program.id()) {
             debug!("Credits program already exists in program store");
             Ok(())
         } else {
             debug!("Loading credits.aleo as part of Program Store initialization");
-            let mut key_map = VerifyingKeyMap::new();
-
-            for function_name in credits_program.functions().keys() {
-                let (_, verifying_key) = vm::get_credits_key(function_name)?;
-                key_map.insert(*function_name, verifying_key);
-            }
+            let key_map = keys
+                .into_iter()
+                .map(|(function, (_proving, verifying))| (function, verifying))
+                .collect();
 
             self.add(credits_program.id(), &credits_program, &key_map)
         }

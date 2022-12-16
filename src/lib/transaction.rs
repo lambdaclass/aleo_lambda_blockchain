@@ -1,5 +1,6 @@
+use crate::load_credits;
 use crate::vm::{self};
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use log::debug;
 use rand;
 use serde::{Deserialize, Serialize};
@@ -88,8 +89,10 @@ impl Transaction {
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let (proving_key, _) = vm::get_credits_key(&function_name)?;
-        let program = vm::Program::credits()?;
+        let (program, keys) = load_credits();
+        let (proving_key, _) = keys
+            .get(&function_name)
+            .ok_or_else(|| anyhow!("credits function not found"))?;
 
         let rng = &mut rand::thread_rng();
 
@@ -99,7 +102,7 @@ impl Transaction {
             inputs,
             private_key,
             rng,
-            proving_key,
+            proving_key.clone(),
         )?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
@@ -184,7 +187,6 @@ impl Transaction {
             }
 
             let gates = gates as i64 - implicit_fee;
-            let fee_function = vm::Identifier::from_str("fee")?;
             let inputs = [
                 vm::Value::Record(record),
                 vm::Value::from_str(&format!("{gates}u64"))?,
@@ -192,15 +194,18 @@ impl Transaction {
 
             let rng = &mut rand::thread_rng();
 
-            let (proving_key, _) = vm::get_credits_key(&fee_function)?;
-            let program = vm::Program::credits()?;
+            let (program, keys) = load_credits();
+            let fee_function = vm::Identifier::from_str("fee")?;
+            let (proving_key, _) = keys
+                .get(&fee_function)
+                .ok_or_else(|| anyhow!("credits function not found"))?;
             let transitions = vm::execution(
                 program,
                 fee_function,
                 &inputs,
                 private_key,
                 rng,
-                proving_key,
+                proving_key.clone(),
             )?;
             Ok(Some(transitions.first().unwrap().clone()))
         } else {

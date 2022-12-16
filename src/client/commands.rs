@@ -205,7 +205,8 @@ impl Command {
                     json!(transaction)
                 }
                 Command::Program(Program::Build { path }) => {
-                    let program_file = ProgramFile::build(&path)?;
+                    let program_source = std::fs::read_to_string(&path)?;
+                    let program_file = ProgramFile::build(&program_source)?;
                     let output_path = path.with_extension("avm");
                     program_file.save(&output_path)?;
                     json!({ "path": output_path })
@@ -498,7 +499,7 @@ mod tests {
     }
 
     fn mint_record(address: &vm::Address, view_key: &vm::ViewKey, amount: u64) -> vm::Record {
-        vm::mint_credits(address, amount, 123)
+        vm::mint_record("credits.aleo", "credits", address, amount, 123)
             .unwrap()
             .1
             .decrypt(view_key)

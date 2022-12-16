@@ -4,7 +4,6 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::str::FromStr;
 /// File that stores the public and private keys associated with an account.
 /// Stores it at $ALEO_HOME/account.json, with ~/.aleo as the default ALEO_HOME.
 #[derive(Serialize, Deserialize)]
@@ -42,9 +41,6 @@ impl Credentials {
     }
 
     fn path() -> PathBuf {
-        std::env::var("ALEO_HOME")
-            .map(|path| PathBuf::from_str(&path).unwrap())
-            .unwrap_or_else(|_| dirs::home_dir().unwrap().join(".aleo"))
-            .join("account.json")
+        lib::aleo_home().join("account.json")
     }
 }
