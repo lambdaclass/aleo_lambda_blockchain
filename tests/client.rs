@@ -20,7 +20,6 @@ const CONSUME_FUNCTION: &str = "consume";
 const CURRENT_ACCOUNT: &str = "%account";
 
 #[test]
-#[ignore = "Check with consensus team"]
 fn basic_program() {
     let (_tempfile, home_path, _) = &new_account();
 
@@ -41,7 +40,7 @@ fn basic_program() {
     // get execution tx, assert expected output
     let transaction = retry_command(home_path, &["get", transaction_id]).unwrap();
     let value = transaction
-        .pointer("/Execution/transitions/0/outputs/0/value")
+        .pointer("/Execution/transitions/0/outputs/0/Private")
         .unwrap()
         .as_str()
         .unwrap();
@@ -51,7 +50,6 @@ fn basic_program() {
 }
 
 #[test]
-#[ignore = "Check ensures"]
 fn program_validations() {
     let (_tempfile, home_path, _) = &new_account();
     let (_program_file, program_path) = load_program(HELLO_PROGRAM);
@@ -73,11 +71,11 @@ fn program_validations() {
     // fail on unknown function
     let error =
         execute_program(home_path, &program_path, UNKNOWN_PROGRAM, &["1u32", "1u32"]).unwrap_err();
-    assert!(error.contains("does not exist"));
+    assert!(error.contains("is not defined"));
 
     // fail on missing parameter
     let error = execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32"]).unwrap_err();
-    assert!(error.contains("expects 2 inputs"));
+    assert!(error.contains("not assigned in registers"));
 }
 
 #[test]
@@ -243,7 +241,6 @@ fn consume_records() {
 }
 
 #[test]
-#[ignore = "Check ensures"]
 fn validate_credits() {
     let (_tempfile, home_path, _) = &new_account();
 
