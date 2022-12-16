@@ -21,7 +21,7 @@ jobs:
       - name: Compress and upload binary to S3
         run: |
           cd target/release/
-          COMPRESSED_FILE=snarkvm_abci-$(git rev-parse --short HEAD).tgz
+          COMPRESSED_FILE=snarkvm_abci-$(TZ=America/Buenos_Aires date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD).tgz
           tar -cz snarkvm_abci -f ${COMPRESSED_FILE}
           aws s3 cp ${COMPRESSED_FILE} s3://entropy-releases/snarkvm_abci/${COMPRESSED_FILE}
         env:
