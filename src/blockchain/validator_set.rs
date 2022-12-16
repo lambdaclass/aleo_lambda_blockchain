@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
 use lib::vm;
 use log::{debug, error, warn};
+use sha2::{Digest, Sha256};
 
 type TendermintAddress = Vec<u8>;
 type VotingPower = u64;
@@ -36,8 +38,10 @@ impl ValidatorSet {
             serde_json::from_str::<HashMap<String, vm::Address>>(&json)
                 .expect("validators file content is invalid")
                 .into_iter()
-                .map(|(tmint_hex_address, aleo_address)| {
-                    (hex::decode(tmint_hex_address).unwrap(), aleo_address)
+                .map(|(tmint_pubkey, aleo_address)| {
+                    let tmint_address = pubkey_to_address(&tmint_pubkey)
+                        .expect("failed to calculate validator hex address");
+                    (tmint_address, aleo_address)
                 })
                 .collect()
         } else {
@@ -54,15 +58,15 @@ impl ValidatorSet {
         }
     }
 
-    /// Replace the entire validator set with the given tendermint to aleo address mapping.
+    /// Replace the entire validator set with the given tendermint pubkey to aleo address mapping.
     /// The mapping is stored to a validators file to pick up across node restarts.
     pub fn set_validators(&mut self, addresses: HashMap<String, vm::Address>) {
         std::fs::write(self.path, serde_json::to_string(&addresses).unwrap()).unwrap();
         let addresses = addresses
             .into_iter()
-            .map(|(tmint_hex_address, aleo_address)| {
-                let tmint_address =
-                    hex::decode(tmint_hex_address).expect("failed to validator hex address");
+            .map(|(tmint_pubkey, aleo_address)| {
+                let tmint_address = pubkey_to_address(&tmint_pubkey)
+                    .expect("failed to calculate validator hex address");
                 (tmint_address, aleo_address)
             })
             .collect();
@@ -79,13 +83,16 @@ impl ValidatorSet {
         if !self.validators.contains_key(&proposer) {
             error!(
                 "received unknown address as proposer {}",
-                hex::encode(&proposer)
+                hex::encode_upper(&proposer)
             );
         }
 
         for voter in votes.keys() {
             if !self.validators.contains_key(voter) {
-                error!("received unknown address as voter {}", hex::encode(voter));
+                error!(
+                    "received unknown address as voter {}",
+                    hex::encode_upper(voter)
+                );
             }
         }
 
@@ -174,6 +181,16 @@ impl ValidatorSet {
     }
 }
 
+/// Coverts a base64 tendermint validator public key (as it appears in the genesis.json)
+/// to its tendermint validator address (as it appears in the block header proposer and votes).
+fn pubkey_to_address(pubkey: &str) -> Result<Vec<u8>> {
+    let bytes = base64::decode(pubkey)?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let bytes = hasher.finalize().as_slice()[..20].to_owned();
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,10 +204,10 @@ mod tests {
 
     #[test]
     fn generate_rewards() {
-        let tmint1 = "7407FC3F3E2F8EEEB77A22CA245EFC66B6D1DC1D";
-        let tmint2 = "24DE0C92BDFC325FCB26BAC27809A98D79B1C3DF";
-        let tmint3 = "C32E15A2D8F006548F079B340EC4420A62EA6AB7";
-        let tmint4 = "1A1E4B1673EBD177B7941225D75217A8EC08B86F";
+        let tmint1 = "vM+mkdPMvplfxO7wM57z4FXy0TlBC2Onb+MaqcXE8ig=";
+        let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
+        let tmint3 = "TtJ9B7yGXANFIJqH2LJO8JN6M2WOn2w7sRN0HHi14UE=";
+        let tmint4 = "uHC9buPyVi5GT8dohO1OQ+HlfKQ1HwUHAyv3AjKKsZQ=";
 
         let aleo1 = account_keys();
         let aleo2 = account_keys();
@@ -209,11 +226,11 @@ mod tests {
 
         // tmint1 is proposer, tmint3 doesn't vote
         let mut votes = HashMap::new();
-        votes.insert(hex::decode(tmint1).unwrap(), 10);
-        votes.insert(hex::decode(tmint2).unwrap(), 15);
-        votes.insert(hex::decode(tmint3).unwrap(), 25);
+        votes.insert(pubkey_to_address(tmint1).unwrap(), 10);
+        votes.insert(pubkey_to_address(tmint2).unwrap(), 15);
+        votes.insert(pubkey_to_address(tmint3).unwrap(), 25);
         let voting_power = 10 + 15 + 25;
-        validators.prepare(hex::decode(tmint1).unwrap(), votes, 1);
+        validators.prepare(pubkey_to_address(tmint1).unwrap(), votes, 1);
 
         // add fees
         validators.add(20);
@@ -245,8 +262,8 @@ mod tests {
 
         // run another block with different votes, rewards start from scratch
         let mut votes = HashMap::new();
-        votes.insert(hex::decode(tmint4).unwrap(), 10);
-        validators.prepare(hex::decode(tmint4).unwrap(), votes, 2);
+        votes.insert(pubkey_to_address(tmint4).unwrap(), 10);
+        validators.prepare(pubkey_to_address(tmint4).unwrap(), votes, 2);
         validators.add(10);
 
         let records = validators.rewards();
@@ -263,8 +280,8 @@ mod tests {
     #[test]
     fn rewards_are_deterministic() {
         // create 2 different validators with the same amounts
-        let tmint1 = "7407FC3F3E2F8EEEB77A22CA245EFC66B6D1DC1D";
-        let tmint2 = "24DE0C92BDFC325FCB26BAC27809A98D79B1C3DF";
+        let tmint1 = "vM+mkdPMvplfxO7wM57z4FXy0TlBC2Onb+MaqcXE8ig=";
+        let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
         let aleo1 = account_keys();
         let aleo2 = account_keys();
         let mut addresses = HashMap::new();
@@ -277,10 +294,10 @@ mod tests {
         validators2.set_validators(addresses);
 
         let mut votes = HashMap::new();
-        votes.insert(hex::decode(tmint1).unwrap(), 10);
-        votes.insert(hex::decode(tmint2).unwrap(), 15);
-        validators1.prepare(hex::decode(tmint1).unwrap(), votes.clone(), 1);
-        validators2.prepare(hex::decode(tmint1).unwrap(), votes.clone(), 1);
+        votes.insert(pubkey_to_address(tmint1).unwrap(), 10);
+        votes.insert(pubkey_to_address(tmint2).unwrap(), 15);
+        validators1.prepare(pubkey_to_address(tmint1).unwrap(), votes.clone(), 1);
+        validators2.prepare(pubkey_to_address(tmint1).unwrap(), votes.clone(), 1);
         validators1.add(100);
         validators2.add(100);
 
@@ -295,8 +312,8 @@ mod tests {
 
         // prepare another block with the same fees, verify that even though
         // the record amounts are the same, the records themselves are not
-        validators1.prepare(hex::decode(tmint1).unwrap(), votes.clone(), 2);
-        validators2.prepare(hex::decode(tmint1).unwrap(), votes.clone(), 2);
+        validators1.prepare(pubkey_to_address(tmint1).unwrap(), votes.clone(), 2);
+        validators2.prepare(pubkey_to_address(tmint1).unwrap(), votes.clone(), 2);
         validators1.add(100);
         validators2.add(100);
 
@@ -319,8 +336,8 @@ mod tests {
 
     #[test]
     fn genesis_rewards() {
-        let tmint1 = "7407FC3F3E2F8EEEB77A22CA245EFC66B6D1DC1D";
-        let tmint2 = "24DE0C92BDFC325FCB26BAC27809A98D79B1C3DF";
+        let tmint1 = "vM+mkdPMvplfxO7wM57z4FXy0TlBC2Onb+MaqcXE8ig=";
+        let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
 
         let aleo1 = account_keys();
         let aleo2 = account_keys();
@@ -335,7 +352,7 @@ mod tests {
 
         // in genesis there won't be any previous block votes
         let votes = HashMap::new();
-        validators.prepare(hex::decode(tmint1).unwrap(), votes, 1);
+        validators.prepare(pubkey_to_address(tmint1).unwrap(), votes, 1);
 
         validators.add(20);
         validators.add(35);
@@ -349,6 +366,16 @@ mod tests {
         // proposer takes all
         assert_eq!(total_rewards, rewards1);
         assert_eq!(0, rewards2);
+    }
+
+    #[test]
+    fn tendermint_pubkey_to_address() {
+        let pubkey = "5/AwkEaNRjhol78iXiuAtlt1eLTY4H2KpGqPQbkvbzc=";
+        let expected_address = "FEF304AC915F3A307B227C946AB1AD37A90E400E";
+
+        let address_bytes = pubkey_to_address(pubkey).unwrap();
+        let address = hex::encode_upper(address_bytes);
+        assert_eq!(expected_address, address);
     }
 
     pub fn account_keys() -> (vm::ViewKey, vm::Address) {
