@@ -2,6 +2,7 @@ use crate::{account, tendermint};
 use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use itertools::Itertools;
+use lib::jaleo::EncryptedRecord;
 use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
@@ -10,7 +11,6 @@ use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use lib::jaleo::EncryptedRecord;
 
 use std::vec;
 
@@ -340,7 +340,7 @@ fn parse_input_value(input: &str) -> Result<jaleo::UserInputValueType> {
 }
 
 pub fn parse_input_record(input: &str) -> Result<jaleo::UserInputValueType> {
-    let ciphertext : EncryptedRecord = serde_json::from_str(input)?;
+    let ciphertext: EncryptedRecord = serde_json::from_str(input)?;
     let credentials = account::Credentials::load()?;
     ciphertext
         .decrypt(&credentials.view_key)

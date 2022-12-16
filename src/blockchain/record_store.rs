@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use lib::jaleo::{self, Field, EncryptedRecord};
+use lib::jaleo::{self, EncryptedRecord, Field};
 use log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use std::collections::{HashMap, HashSet};
@@ -19,7 +19,10 @@ type Value = Vec<u8>;
 /// Internal channel reply for the scan command
 type ScanReply = (Vec<(Key, Value)>, Option<Key>);
 /// Public return type for the scan command.
-type ScanResult = (Vec<(Commitment, jaleo::EncryptedRecord)>, Option<SerialNumber>);
+type ScanResult = (
+    Vec<(Commitment, jaleo::EncryptedRecord)>,
+    Option<SerialNumber>,
+);
 
 /// The record store tracks the known unspent and spent record sets (similar to bitcoin's UTXO set)
 /// according to the transactions that are committed to the ledger.
@@ -267,7 +270,7 @@ mod tests {
     use std::fs;
 
     use indexmap::IndexMap;
-    use lib::jaleo::{ViewKey, PrivateKey};
+    use lib::jaleo::{PrivateKey, ViewKey};
     use vmtropy::helpers::to_address;
 
     use super::*;
@@ -416,7 +419,9 @@ mod tests {
     // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
 
     fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
-        let address = to_address(String::from("aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry"));
+        let address = to_address(String::from(
+            "aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry",
+        ));
         let record = EncryptedRecord::new(address, 5, IndexMap::new(), None);
         let commitment = record.commitment().unwrap();
 
