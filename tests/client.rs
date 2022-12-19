@@ -254,12 +254,6 @@ fn validate_credits() {
     .unwrap();
     assert!(output.contains("Coinbase functions cannot be called"));
 
-    // test that executing the genesis function fails
-    let output = execute_program(home_path, credits_path, "genesis", &["%account", "100u64"])
-        .err()
-        .unwrap();
-    assert!(output.contains("Coinbase functions cannot be called"));
-
     let (_program_file, program_path) = load_program("credits");
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
     let output = execute_program(
@@ -295,7 +289,7 @@ fn transfer_credits() {
             "transfer",
             &record,
             credentials.get("address").unwrap(),
-            "10u64",
+            "10",
         ],
     )
     .unwrap();
@@ -336,7 +330,7 @@ fn transaction_fees() {
             "transfer",
             &record,
             credentials.get("address").unwrap(),
-            "10u64",
+            "10",
         ],
     )
     .unwrap();
@@ -387,8 +381,7 @@ fn transaction_fees() {
 
     // at this point there's a single record in the account, since we want to run a credits program
     // below and also pay a separate fee, we'll have to split it first
-    let transaction =
-        client_command(receiver_home, &["credits", "split", &record, "3u64"]).unwrap();
+    let transaction = client_command(receiver_home, &["credits", "split", &record, "3"]).unwrap();
 
     // request the transaction until it's committed before moving on, to ensure records are available
     let transaction_id = get_transaction_id(&transaction).unwrap();
@@ -450,6 +443,99 @@ fn transaction_fees() {
     )
     .unwrap();
     assert_balance(receiver_home, 2).unwrap();
+}
+
+#[test]
+fn staking() {
+    // create a test account
+    let (_tempfile, receiver_home, credentials) = &new_account();
+
+    // transfer a known amount of credits to the test account
+    let validator_home = validator_account_path();
+    let tendermint_validator = validator_address(&validator_home);
+    let record = client_command(&validator_home, &["account", "records"])
+        .unwrap()
+        .pointer("/2/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    client_command(
+        &validator_home,
+        &[
+            "credits",
+            "transfer",
+            &record,
+            credentials.get("address").unwrap(),
+            "50",
+        ],
+    )
+    .unwrap();
+
+    assert_balance(receiver_home, 50).unwrap();
+
+    let record = client_command(receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // try to stake more than available, fail
+    let error = client_command(
+        receiver_home,
+        &["credits", "stake", "60", &record, &tendermint_validator],
+    )
+    .unwrap_err();
+    // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
+    // this should be improved to properly handle execution errors internally and showing a clear error message in the CLI
+    assert!(error.contains("Integer subtraction failed"));
+
+    // TODO add check: try to stake for an unexistent validator, fail
+
+    // stake all available
+    let transaction = client_command(
+        receiver_home,
+        &["credits", "stake", "50", &record, &tendermint_validator],
+    )
+    .unwrap();
+
+    let staked_credits_record = transaction
+        .pointer("/Execution/transitions/0/outputs/1/value")
+        .unwrap()
+        .as_str()
+        .unwrap();
+
+    // try to unstake more than available, fail
+    let error = client_command(
+        receiver_home,
+        &[
+            "credits",
+            "unstake",
+            "60",
+            staked_credits_record,
+            &tendermint_validator,
+        ],
+    )
+    .unwrap_err();
+    // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
+    // this should be improved to properly handle execution errors internally and showing a clear error message in the CLI
+    assert!(error.contains("Integer subtraction failed"));
+
+    // unstake all available
+    client_command(
+        receiver_home,
+        &[
+            "credits",
+            "unstake",
+            "50",
+            staked_credits_record,
+            &tendermint_validator,
+        ],
+    )
+    .unwrap();
 }
 
 // HELPERS
@@ -616,4 +702,11 @@ fn validator_account_path() -> String {
         .join(".tendermint")
         .to_string_lossy()
         .into()
+}
+
+fn validator_address(tendermint_home: &str) -> String {
+    let key_path = std::path::Path::new(tendermint_home).join("config/priv_validator_key.json");
+    let json = std::fs::read_to_string(key_path).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json).unwrap();
+    json["pub_key"]["value"].as_str().unwrap().to_string()
 }

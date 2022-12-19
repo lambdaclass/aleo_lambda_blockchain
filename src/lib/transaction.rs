@@ -19,6 +19,18 @@ pub enum Transaction {
     Execution {
         id: String,
         transitions: Vec<vm::Transition>,
+
+        /// The pub key of the tendermint validator that staked credits go to,
+        /// in case this is a staking/unstaking execution.
+        // NOTE: for most purposes the stake/unstake transactions are just another type of/ execution.
+        // we could handle most of the special properties as methods in Transaction, but since the vm
+        // doesn't have support for a type where we could fit the validator address, we need to treat it
+        // as a special case and pass it separately (which also prevents us to include that address in the
+        // execution proof).
+        // also NOTE: having the address out of the record and as a separate field means that we can't ensure
+        // the voting power gets removed from the same tendermint validator that did the staking in the first place.
+        // we may work around that but ideally having the tendermint address in the record would be preferable
+        validator: Option<String>,
     },
 }
 
@@ -80,30 +92,21 @@ impl Transaction {
 
         let id = uuid::Uuid::new_v4().to_string();
 
-        Ok(Self::Execution { id, transitions })
+        Ok(Self::Execution {
+            id,
+            transitions,
+            validator: None,
+        })
     }
 
     pub fn credits_execution(
-        function_name: vm::Identifier,
+        function_name: &str,
         inputs: &[vm::Value],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
+        validator: Option<String>,
     ) -> Result<Self> {
-        let (program, keys) = load_credits();
-        let (proving_key, _) = keys
-            .get(&function_name)
-            .ok_or_else(|| anyhow!("credits function not found"))?;
-
-        let rng = &mut rand::thread_rng();
-
-        let mut transitions = vm::execution(
-            program,
-            function_name,
-            inputs,
-            private_key,
-            rng,
-            proving_key.clone(),
-        )?;
+        let mut transitions = Self::execute_credits(function_name, inputs, private_key)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -113,7 +116,11 @@ impl Transaction {
         }
 
         let id = uuid::Uuid::new_v4().to_string();
-        Ok(Self::Execution { id, transitions })
+        Ok(Self::Execution {
+            id,
+            transitions,
+            validator,
+        })
     }
 
     pub fn id(&self) -> &str {
@@ -192,25 +199,33 @@ impl Transaction {
                 vm::Value::from_str(&format!("{gates}u64"))?,
             ];
 
-            let rng = &mut rand::thread_rng();
-
-            let (program, keys) = load_credits();
-            let fee_function = vm::Identifier::from_str("fee")?;
-            let (proving_key, _) = keys
-                .get(&fee_function)
-                .ok_or_else(|| anyhow!("credits function not found"))?;
-            let transitions = vm::execution(
-                program,
-                fee_function,
-                &inputs,
-                private_key,
-                rng,
-                proving_key.clone(),
-            )?;
+            let transitions = Self::execute_credits("fee", &inputs, private_key)?;
             Ok(Some(transitions.first().unwrap().clone()))
         } else {
             Ok(None)
         }
+    }
+
+    fn execute_credits(
+        function: &str,
+        inputs: &[vm::Value],
+        private_key: &vm::PrivateKey,
+    ) -> Result<Vec<vm::Transition>> {
+        let rng = &mut rand::thread_rng();
+        let function = vm::Identifier::from_str(function)?;
+        let (program, keys) = load_credits();
+        let (proving_key, _) = keys
+            .get(&function)
+            .ok_or_else(|| anyhow!("credits function not found"))?;
+
+        vm::execution(
+            program,
+            function,
+            inputs,
+            private_key,
+            rng,
+            proving_key.clone(),
+        )
     }
 }
 
@@ -220,10 +235,21 @@ impl std::fmt::Display for Transaction {
             Transaction::Deployment { id, program, .. } => {
                 write!(f, "Deployment({},{})", id, program.id())
             }
-            Transaction::Execution { id, transitions } => {
+            Transaction::Execution {
+                id,
+                transitions,
+                validator: None,
+            } => {
                 let transition = transitions.first().unwrap();
                 let program_id = transition.program_id();
                 write!(f, "Execution({program_id},{id})")
+            }
+            Transaction::Execution {
+                id,
+                validator: Some(validator),
+                ..
+            } => {
+                write!(f, "StakingExecution({id},{validator})")
             }
         }
     }

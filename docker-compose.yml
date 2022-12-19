@@ -73,6 +73,7 @@ services:
     volumes:
       - ./testnet/node0/root:/root:Z
       - ~/.aleo/resources:/root/.aleo/resources:Z
+      - ~/.aleo/cache:/root/.aleo/cache:Z
     command: "/target/release/snarkvm_abci --host 192.167.10.6 --verbose"
     networks:
       localnet:
@@ -86,6 +87,7 @@ services:
     volumes:
       - ./testnet/node1/root:/root:Z
       - ~/.aleo/resources:/root/.aleo/resources:Z
+      - ~/.aleo/cache:/root/.aleo/cache:Z
     command: "/target/release/snarkvm_abci --host 192.167.10.7"
     networks:
       localnet:
@@ -99,6 +101,7 @@ services:
     volumes:
       - ./testnet/node2/root:/root:Z
       - ~/.aleo/resources:/root/.aleo/resources:Z
+      - ~/.aleo/cache:/root/.aleo/cache:Z
     command: "/target/release/snarkvm_abci --host 192.167.10.8"
     networks:
       localnet:
@@ -112,6 +115,7 @@ services:
     volumes:
       - ./testnet/node3/root:/root:Z
       - ~/.aleo/resources:/root/.aleo/resources:Z
+      - ~/.aleo/cache:/root/.aleo/cache:Z
     command: "/target/release/snarkvm_abci --host 192.167.10.9"
     networks:
       localnet:

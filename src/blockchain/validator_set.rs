@@ -41,6 +41,11 @@ impl ValidatorSet {
                 .map(|(tmint_pubkey, aleo_address)| {
                     let tmint_address = pubkey_to_address(&tmint_pubkey)
                         .expect("failed to calculate validator hex address");
+                    debug!(
+                        "loading validator {} {}",
+                        hex::encode_upper(&tmint_address),
+                        aleo_address
+                    );
                     (tmint_address, aleo_address)
                 })
                 .collect()
@@ -67,6 +72,11 @@ impl ValidatorSet {
             .map(|(tmint_pubkey, aleo_address)| {
                 let tmint_address = pubkey_to_address(&tmint_pubkey)
                     .expect("failed to calculate validator hex address");
+                debug!(
+                    "loading validator {} {}",
+                    hex::encode_upper(&tmint_address),
+                    aleo_address
+                );
                 (tmint_address, aleo_address)
             })
             .collect();
@@ -140,7 +150,9 @@ impl ValidatorSet {
             // of rounding errors when distributing based on voting power above
             debug!(
                 "{} is current round proposer",
-                self.validators.get(proposer).unwrap()
+                self.validators
+                    .get(proposer)
+                    .expect("proposer not found in address map")
             );
             *rewards.entry(proposer).or_default() += remaining_fees;
 
@@ -160,7 +172,7 @@ impl ValidatorSet {
 
                 debug!(
                     "Assigning {credits} credits to {aleo_address} (voting power {})",
-                    self.current_votes.get(address).unwrap()
+                    self.current_votes.get(address).unwrap_or(&0)
                 );
                 let record = vm::mint_record(
                     "credits.aleo",
@@ -275,6 +287,53 @@ mod tests {
         assert_eq!(0, rewards2);
         assert_eq!(0, rewards3);
         assert_eq!(BASELINE_BLOCK_REWARD + 10, rewards4);
+    }
+
+    #[test]
+    fn current_proposer_hadnt_vote() {
+        // the current round proposer for some reason may not have voted on the previous round
+        // we've seen this happening at cluster start. This test exercises that case to make
+        // sure we don't rely on the proposer address being included in the current votes
+
+        let tmint1 = "vM+mkdPMvplfxO7wM57z4FXy0TlBC2Onb+MaqcXE8ig=";
+        let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
+
+        let aleo1 = account_keys();
+        let aleo2 = account_keys();
+
+        // create validator set, set validators with voting power
+        let mut validators = ValidatorSet::new("abci.validators.test.1");
+
+        let mut addresses = HashMap::new();
+        addresses.insert(tmint1.to_string(), aleo1.1);
+        addresses.insert(tmint2.to_string(), aleo2.1);
+        validators.set_validators(addresses);
+
+        // tmint1 is proposer and didn't vote
+        let mut votes = HashMap::new();
+        votes.insert(pubkey_to_address(tmint2).unwrap(), 15);
+        let voting_power = 15;
+        validators.prepare(pubkey_to_address(tmint1).unwrap(), votes, 1);
+
+        // add fees
+        validators.add(35);
+        let fees = 35;
+
+        // get rewards
+        let records = validators.rewards();
+        let rewards1 = decrypt_rewards(&aleo1, &records);
+        let rewards2 = decrypt_rewards(&aleo2, &records);
+
+        // check proposer gets 50% and the rest is distributed according to vote power
+        let total_rewards = BASELINE_BLOCK_REWARD + fees;
+        let voter_rewards = total_rewards * PROPOSER_REWARD_PERCENTAGE / 100;
+
+        // ensure the no credits are lost in the process
+        assert_eq!(total_rewards, rewards1 + rewards2);
+
+        // non-proposers receive credits proportional to their voting power
+        assert_eq!(voter_rewards * 15 / voting_power, rewards2);
+        assert_eq!(total_rewards - rewards2, rewards1);
     }
 
     #[test]

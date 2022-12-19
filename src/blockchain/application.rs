@@ -387,22 +387,16 @@ impl SnarkVMApp {
         }
     }
 
-    /// Apply the transaction side-effects to the application (off-ledger) state, for
-    /// example adding the programs to the program store.
     fn store_program(&self, transaction: &Transaction) -> Result<()> {
-        match transaction {
-            Transaction::Deployment {
-                program,
-                verifying_keys,
-                ..
-            } => self.programs.add(program.id(), program, verifying_keys),
-            Transaction::Execution { .. } => {
-                // we run finalize to save the program in the process for later execute verification
-                // it's not clear that we're interested in the store here, but it's required for that function
-                // note we could've use process.load_deployment instead but that one is private
-                Ok(())
-            }
+        if let Transaction::Deployment {
+            program,
+            verifying_keys,
+            ..
+        } = transaction
+        {
+            self.programs.add(program.id(), program, verifying_keys)?
         }
+        Ok(())
     }
 }
 
