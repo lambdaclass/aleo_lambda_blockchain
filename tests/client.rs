@@ -59,6 +59,15 @@ fn program_validations() {
         execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32", "1u32"]).unwrap_err();
     assert!(error.contains("Error executing transaction 1: Could not verify transaction"));
 
+    // not fail on dry-running non-deployed program ()
+    execute_program(
+        home_path,
+        &program_path,
+        HELLO_PROGRAM,
+        &["1u32", "1u32", "--dry-run"],
+    )
+    .unwrap();
+
     // deploy a program, save txid
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
 
@@ -108,9 +117,24 @@ fn decrypt_records() {
     assert_eq!(gates.to_string(), "0u64.private");
     assert_eq!(owner.to_string(), format!("{address}.private"));
 
+    // dry run contains decrypted records
+    let output = execute_program(
+        home_path,
+        &program_path,
+        MINT_FUNCTION,
+        &["1u64", CURRENT_ACCOUNT, "--dry-run"],
+    )
+    .unwrap();
+
+    output
+        .pointer("/decrypted_records")
+        .unwrap()
+        .as_array()
+        .unwrap();
+
     let (_acc_file, home_path, _) = &new_account();
 
-    // // should fail to decrypt records (different credentials)
+    // should fail to decrypt records (different credentials)
     let transaction = retry_command(home_path, &["get", transaction_id, "-d"]).unwrap();
 
     let decrypted_records = transaction

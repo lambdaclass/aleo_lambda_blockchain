@@ -5,7 +5,7 @@ use itertools::Itertools;
 use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
-use lib::vm;
+use lib::vm::{self};
 use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
@@ -131,7 +131,7 @@ pub enum Program {
         #[clap(long, value_parser=parse_input_record)]
         fee_record: Option<vm::Value>,
     },
-    /// Runs locally and sends an execution transaction to the Blockchain, returning the Transaction ID
+    /// Runs locally and sends an execution transaction to the blockchain, returning the Transaction ID
     Execute {
         /// Path where the package resides.
         #[clap(value_parser)]
@@ -148,6 +148,9 @@ pub enum Program {
         /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
         #[clap(long, value_parser=parse_input_record)]
         fee_record: Option<vm::Value>,
+        /// Run the input code locally, generating the execution proof but without sending it over to the blockchain. Displays execution and decrypted records.
+        #[clap(long, short, default_value_t = false)]
+        dry_run: bool,
     },
     /// Builds an .aleo program's keys and saves them to an .avm file
     Build {
@@ -225,6 +228,7 @@ impl Command {
                     inputs,
                     fee,
                     fee_record,
+                    dry_run,
                 }) => {
                     let fee =
                         choose_fee_record(&credentials, &url, &fee, &fee_record, &inputs).await?;
@@ -235,9 +239,22 @@ impl Command {
                         &credentials.private_key,
                         fee,
                     )?;
-                    let transaction_serialized = bincode::serialize(&transaction).unwrap();
-                    tendermint::broadcast(transaction_serialized, &url).await?;
-                    json!(transaction)
+
+                    let mut transaction_json = json!(transaction);
+                    if !dry_run {
+                        let transaction_serialized = bincode::serialize(&transaction).unwrap();
+                        tendermint::broadcast(transaction_serialized, &url).await?;
+                    } else {
+                        let records = Self::decrypt_records(&transaction, credentials);
+
+                        if !records.is_empty() {
+                            transaction_json
+                                .as_object_mut()
+                                .unwrap()
+                                .insert("decrypted_records".to_string(), json!(records));
+                        }
+                    }
+                    json!(transaction_json)
                 }
                 Command::Program(Program::Build { path }) => {
                     let program_source = std::fs::read_to_string(&path)?;
@@ -353,14 +370,7 @@ impl Command {
                     if !decrypt {
                         json!(transaction)
                     } else {
-                        let records: Vec<vm::Record> = transaction
-                            .output_records()
-                            .iter()
-                            .filter(|(_, record)| {
-                                record.is_owner(&credentials.address, &credentials.view_key)
-                            })
-                            .filter_map(|(_, record)| record.decrypt(&credentials.view_key).ok())
-                            .collect();
+                        let records = Self::decrypt_records(&transaction, credentials);
 
                         json!({
                             "execution": transaction,
@@ -372,6 +382,18 @@ impl Command {
         };
 
         Ok(output)
+    }
+
+    fn decrypt_records(
+        transaction: &Transaction,
+        credentials: account::Credentials,
+    ) -> Vec<vm::Record> {
+        transaction
+            .output_records()
+            .iter()
+            .filter(|(_, record)| record.is_owner(&credentials.address, &credentials.view_key))
+            .filter_map(|(_, record)| record.decrypt(&credentials.view_key).ok())
+            .collect()
     }
 }
 
