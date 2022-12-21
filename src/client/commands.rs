@@ -5,10 +5,11 @@ use itertools::Itertools;
 use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
-use lib::vm::{self};
+use lib::vm::{self, ProgramID};
 use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
+use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -133,9 +134,9 @@ pub enum Program {
     },
     /// Runs locally and sends an execution transaction to the blockchain, returning the Transaction ID
     Execute {
-        /// Path where the package resides.
+        /// Program to execute (path or program_id).
         #[clap(value_parser)]
-        path: PathBuf,
+        program: String,
         /// The function name.
         #[clap(value_parser)]
         function: vm::Identifier,
@@ -223,7 +224,7 @@ impl Command {
                     json!(transaction)
                 }
                 Command::Program(Program::Execute {
-                    path,
+                    program,
                     function,
                     inputs,
                     fee,
@@ -232,8 +233,12 @@ impl Command {
                 }) => {
                     let fee =
                         choose_fee_record(&credentials, &url, &fee, &fee_record, &inputs).await?;
+                    let program = match get_program(&url, &program).await? {
+                        Some(program) => program,
+                        None => bail!("Could not find program {}", program),
+                    };
                     let transaction = Transaction::execution(
-                        &path,
+                        program,
                         function,
                         &inputs,
                         &credentials.private_key,
@@ -507,6 +512,22 @@ async fn choose_fee_record(
         .collect();
 
     select_default_fee_record(amount, inputs, &account_records).map(|record| Some((amount, record)))
+}
+
+async fn get_program(url: &str, program: &str) -> Result<Option<vm::Program>> {
+    match fs::read_to_string(PathBuf::from(program)) {
+        Ok(program_string) => vm::generate_program(&program_string).map(Some),
+        Err(_) => get_program_from_blockchain(url, ProgramID::from_str(program)?).await,
+    }
+}
+
+async fn get_program_from_blockchain(
+    url: &str,
+    program_id: vm::ProgramID,
+) -> Result<Option<vm::Program>> {
+    let result = tendermint::query(AbciQuery::GetProgram { program_id }.into(), url).await?;
+    let program: Option<vm::Program> = bincode::deserialize(&result)?;
+    Ok(program)
 }
 
 /// Select one of the records to be used to pay the requested fee,

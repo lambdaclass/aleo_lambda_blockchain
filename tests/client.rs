@@ -24,7 +24,7 @@ fn basic_program() {
     let (_tempfile, home_path, _) = &new_account();
 
     // deploy a program
-    let (_program_file, program_path) = load_program(HELLO_PROGRAM);
+    let (_program_file, program_path, _) = load_program(HELLO_PROGRAM);
     let transaction = client_command(home_path, &["program", "deploy", &program_path]).unwrap();
     let transaction_id = get_transaction_id(&transaction).unwrap();
 
@@ -52,7 +52,7 @@ fn basic_program() {
 #[test]
 fn program_validations() {
     let (_tempfile, home_path, _) = &new_account();
-    let (_program_file, program_path) = load_program(HELLO_PROGRAM);
+    let (_program_file, program_path, program_id) = load_program(HELLO_PROGRAM);
 
     // fail on execute non deployed command
     let error =
@@ -68,7 +68,7 @@ fn program_validations() {
     )
     .unwrap();
 
-    // deploy a program, save txid
+    // deploy a program
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
 
     // fail on already deployed compiled locally
@@ -76,6 +76,14 @@ fn program_validations() {
     assert!(error.contains(
         "Error executing transaction 1: Could not verify transaction: Program already exists"
     ));
+
+    // execute the program, retrieving it from the blockchain, using it's id
+    execute_program(home_path, &program_id, "hello", &["1u32", "1u32"]).unwrap();
+
+    // fail on program execution with an invalid id
+    let error =
+        execute_program(home_path, "inexistent_id.aleo", "hello", &["1u32", "1u32"]).unwrap_err();
+    assert!(error.contains("Could not find program"));
 
     // fail on unknown function
     let error =
@@ -90,7 +98,7 @@ fn program_validations() {
 #[test]
 fn decrypt_records() {
     let (_acc_file, home_path, credentials) = &new_account();
-    let (_program_file, program_path) = load_program(TOKEN_PROGRAM);
+    let (_program_file, program_path, _) = load_program(TOKEN_PROGRAM);
 
     // deploy a program, save txid
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
@@ -153,7 +161,7 @@ fn token_transaction() {
     let (_tempfile_bob, bob_home, bob_credentials) = &new_account();
 
     // Load token program with Alice credentials
-    let (_program_file, program_path) = load_program("token");
+    let (_program_file, program_path, _) = load_program("token");
 
     // Deploy the token program to the blockchain
     client_command(alice_home, &["program", "deploy", &program_path]).unwrap();
@@ -211,7 +219,7 @@ fn consume_records() {
     let (_acc_file, home_path, _) = &new_account();
 
     // load "records" program
-    let (_program_file, program_path) = load_program("records");
+    let (_program_file, program_path, _) = load_program("records");
 
     // deploy "records" program
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
@@ -278,7 +286,7 @@ fn validate_credits() {
     .unwrap();
     assert!(output.contains("Coinbase functions cannot be called"));
 
-    let (_program_file, program_path) = load_program("credits");
+    let (_program_file, program_path, _) = load_program("credits");
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
     let output = execute_program(
         home_path,
@@ -329,7 +337,7 @@ fn transaction_fees() {
     let (_tempfile, receiver_home, credentials) = &new_account();
 
     // try to run a deployment with a fee but no credits available, should fail
-    let (_program_file, program_path) = load_program(HELLO_PROGRAM);
+    let (_program_file, program_path, _) = load_program(HELLO_PROGRAM);
     let output = client_command(
         receiver_home,
         &["program", "deploy", &program_path, "--fee", "100"],
@@ -613,21 +621,19 @@ fn new_account() -> (NamedTempFile, String, HashMap<String, String>) {
     (tempfile, aleo_path, credentials)
 }
 
-/// Load the source code from the given example file, and return a tempfile along with its path,
-/// with the same source code but a randomized name.
+/// Load the source code from the given example file, randomize it's name, and return a tempfile
+/// with the same source code but with the new name, along with its path and the new id.
 /// The file will be removed when it goes out of scope.
-fn load_program(program_name: &str) -> (NamedTempFile, String) {
+fn load_program(program_name: &str) -> (NamedTempFile, String, String) {
     let program_file = NamedTempFile::new(program_name).unwrap();
     let path = program_file.path().to_string_lossy().to_string();
     // FIXME hardcoded path
     let source = fs::read_to_string(format!("aleo/{program_name}.aleo")).unwrap();
     // randomize the name so it's different on every test
-    let source = source.replace(
-        &format!("{program_name}.aleo"),
-        &format!("{}{}.aleo", program_name, unique_id()),
-    );
+    let program_id = format!("{}{}.aleo", program_name, unique_id());
+    let source = source.replace(&format!("{program_name}.aleo"), &program_id);
     fs::write(&path, source).unwrap();
-    (program_file, path)
+    (program_file, path, program_id)
 }
 
 fn unique_id() -> String {

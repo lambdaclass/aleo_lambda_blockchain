@@ -4,8 +4,7 @@ use crate::record_store::RecordStore;
 use crate::{program_store::ProgramStore, validator_set::ValidatorSet};
 use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
-use lib::query::AbciQuery;
-use lib::{transaction::Transaction, vm, GenesisState};
+use lib::{query::AbciQuery, transaction::Transaction, vm, GenesisState};
 use tendermint_abci::Application;
 use tendermint_proto::abci;
 
@@ -72,11 +71,9 @@ impl Application for SnarkVMApp {
 
     /// This hook is to query the application for data at the current or past height.
     fn query(&self, request: abci::RequestQuery) -> abci::ResponseQuery {
-        let query: AbciQuery = bincode::deserialize(&request.data).unwrap();
-
-        let query_result = match query {
-            AbciQuery::GetRecords => {
-                info!("Fetching records");
+        let query_result = match bincode::deserialize(&request.data) {
+            Ok(AbciQuery::GetRecords) => {
+                debug!("Fetching records");
                 // TODO: This fetches all the records from the RecordStore to filter here the
                 // owned ones. With a large database this will involve a lot of data/time
                 // so we should think of a better way to handle this. (eg. pagination or asynchronous
@@ -86,27 +83,33 @@ impl Application for SnarkVMApp {
                     .scan(None, None)
                     .map(|result| bincode::serialize(&result).unwrap())
             }
-            AbciQuery::GetSpentSerialNumbers => {
-                info!("Fetching spent records's serial numbers");
+            Ok(AbciQuery::GetSpentSerialNumbers) => {
+                debug!("Fetching spent records's serial numbers");
 
                 self.records
                     .scan_spent()
                     .map(|result| bincode::serialize(&result).unwrap())
             }
+            Ok(AbciQuery::GetProgram { program_id }) => {
+                debug!("Fetching {}", program_id);
+                self.programs.get(&program_id).map(|result| {
+                    bincode::serialize(&result.map(|(program, _keys)| program)).unwrap()
+                })
+            }
+            Err(e) => Err(e.into()),
         };
 
-        if let Err(e) = query_result {
-            return abci::ResponseQuery {
+        match query_result {
+            Ok(value) => abci::ResponseQuery {
+                value,
+                ..Default::default()
+            },
+            Err(e) => abci::ResponseQuery {
                 code: 1,
                 log: format!("Error running query: {e}"),
                 info: format!("Error running query: {e}"),
                 ..Default::default()
-            };
-        }
-
-        abci::ResponseQuery {
-            value: query_result.unwrap(),
-            ..Default::default()
+            },
         }
     }
 

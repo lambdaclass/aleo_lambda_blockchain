@@ -63,14 +63,12 @@ impl Transaction {
 
     // Used to generate an execution of a program in path or an execution of the credits program
     pub fn execution(
-        path: &Path,
+        program: vm::Program,
         function_name: vm::Identifier,
         inputs: &[vm::Value],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let program_string = fs::read_to_string(path).unwrap();
-        let program: vm::Program = vm::generate_program(&program_string)?;
         let rng = &mut rand::thread_rng();
 
         let (proving_key, _) = vm::synthesize_function_keys(&program, rng, &function_name)?;

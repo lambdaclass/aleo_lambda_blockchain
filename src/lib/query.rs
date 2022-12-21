@@ -1,3 +1,4 @@
+use crate::vm::ProgramID;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -6,6 +7,8 @@ pub enum AbciQuery {
     GetRecords,
     /// Returns all spent records's serial numbers
     GetSpentSerialNumbers,
+    /// Returns the program struct given it's id
+    GetProgram { program_id: ProgramID },
 }
 
 impl From<AbciQuery> for Vec<u8> {
