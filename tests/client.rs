@@ -124,7 +124,7 @@ fn decrypt_records() {
 }
 
 #[test]
-#[ignore = "Literal operands are not yet supported in VMtropy"]
+#[ignore = "DeserializeAny is not supported by bincode"]
 fn token_transaction() {
     // Create two accounts: Alice and Bob
     let (_tempfile_alice, alice_home, alice_credentials) = &new_account();
