@@ -1,4 +1,4 @@
-use crate::vm::{self, jaleo};
+use crate::vm::{self};
 use anyhow::{ensure, Result};
 use indexmap::IndexMap;
 use log::debug;
@@ -6,19 +6,18 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use vm::jaleo::{Record, VerifyingKey, VerifyingKeyMap};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Transaction {
     Deployment {
         id: String,
-        program: Box<jaleo::Program>,
-        verifying_keys: jaleo::VerifyingKeyMap,
-        fee: Option<jaleo::Transition>,
+        program: Box<vm::Program>,
+        verifying_keys: vm::VerifyingKeyMap,
+        fee: Option<vm::Transition>,
     },
     Execution {
         id: String,
-        transitions: Vec<jaleo::Transition>,
+        transitions: Vec<vm::Transition>,
     },
 }
 
@@ -26,8 +25,8 @@ impl Transaction {
     // Used to generate deployment of a new program in path
     pub fn deployment(
         path: &Path,
-        private_key: &jaleo::PrivateKey,
-        fee: Option<(u64, jaleo::Record)>,
+        private_key: &vm::PrivateKey,
+        fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
         let program_string = fs::read_to_string(path)?;
         debug!("Deploying program {}", program_string);
@@ -35,7 +34,7 @@ impl Transaction {
         // generate program keys (proving and verifying) and keep the verifying one for the deploy
         let (program, program_build) = vm::build_program(&program_string)?;
 
-        let verifying_keys: IndexMap<String, VerifyingKey> = program_build
+        let verifying_keys: IndexMap<String, crate::vm::VerifyingKey> = program_build
             .map
             .into_iter()
             .map(|(i, keys)| (i, keys.1))
@@ -47,7 +46,7 @@ impl Transaction {
             id,
             fee,
             program: Box::new(program),
-            verifying_keys: VerifyingKeyMap {
+            verifying_keys: crate::vm::VerifyingKeyMap {
                 map: verifying_keys,
             },
         })
@@ -56,15 +55,14 @@ impl Transaction {
     // Used to generate an execution of a program in path or an execution of the credits program
     pub fn execution(
         path: &Path,
-        function_name: jaleo::Identifier,
-        inputs: &[jaleo::UserInputValueType],
-        private_key: &jaleo::PrivateKey,
-        requested_fee: Option<(u64, jaleo::Record)>,
+        function_name: vm::Identifier,
+        inputs: &[vm::UserInputValueType],
+        private_key: &vm::PrivateKey,
+        requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
         let program_string = fs::read_to_string(path).unwrap();
-        let program = jaleo::generate_program(&program_string)?;
-        let rng = &mut vm::generate_rand();
-        let mut transitions = jaleo::execution(&program, &function_name, inputs, private_key, rng)?;
+        let program = vm::generate_program(&program_string)?;
+        let mut transitions = vm::execution(program, function_name, inputs, private_key)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -79,16 +77,14 @@ impl Transaction {
     }
 
     pub fn credits_execution(
-        function_name: jaleo::Identifier,
-        inputs: &[jaleo::UserInputValueType],
-        private_key: &jaleo::PrivateKey,
-        requested_fee: Option<(u64, jaleo::Record)>,
+        function_name: vm::Identifier,
+        inputs: &[vm::UserInputValueType],
+        private_key: &vm::PrivateKey,
+        requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let program = jaleo::Program::credits()?;
+        let program = vm::Program::credits()?;
 
-        let rng = &mut vm::generate_rand();
-
-        let mut transitions = jaleo::execution(&program, &function_name, inputs, private_key, rng)?;
+        let mut transitions = vm::execution(program, function_name, inputs, private_key)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -108,7 +104,7 @@ impl Transaction {
         }
     }
 
-    pub fn output_records(&self) -> Vec<jaleo::EncryptedRecord> {
+    pub fn output_records(&self) -> Vec<vm::EncryptedRecord> {
         self.transitions()
             .iter()
             .flat_map(|transition| transition.output_records())
@@ -116,14 +112,14 @@ impl Transaction {
     }
 
     /// If the transaction is an execution, return the list of input record serial numbers
-    pub fn record_serial_numbers(&self) -> Vec<jaleo::Field> {
+    pub fn record_serial_numbers(&self) -> Vec<vm::Field> {
         self.transitions()
             .iter()
             .flat_map(|transition| transition.serial_numbers())
             .collect()
     }
 
-    fn transitions(&self) -> Vec<jaleo::Transition> {
+    fn transitions(&self) -> Vec<vm::Transition> {
         match self {
             Transaction::Deployment { fee, .. } => {
                 if let Some(transition) = fee {
@@ -155,10 +151,10 @@ impl Transaction {
     /// The fee function just burns the desired amount of credits, so its effect is just
     /// to produce a difference between the input/output records of its transition.
     fn execute_fee(
-        private_key: &jaleo::PrivateKey,
-        requested_fee: Option<(u64, jaleo::Record)>,
+        private_key: &vm::PrivateKey,
+        requested_fee: Option<(u64, vm::Record)>,
         implicit_fee: i64,
-    ) -> Result<Option<jaleo::Transition>> {
+    ) -> Result<Option<vm::Transition>> {
         if let Some((gates, record)) = requested_fee {
             ensure!(
                 implicit_fee >= 0,
@@ -171,22 +167,20 @@ impl Transaction {
             }
 
             let gates = gates as i64 - implicit_fee;
-            let fee_function = jaleo::Identifier::from_str("fee")?;
+            let fee_function = vm::Identifier::from_str("fee")?;
             let inputs = [
-                jaleo::UserInputValueType::Record(Record {
+                vm::UserInputValueType::Record(crate::vm::Record {
                     owner: record.owner,
                     gates: record.gates,
                     entries: record.entries,
                     nonce: record.nonce,
                 }),
                 // TODO: Revisit the cast below.
-                jaleo::UserInputValueType::U64(gates as u64),
+                vm::UserInputValueType::U64(gates as u64),
             ];
 
-            let rng = &mut vm::generate_rand();
-
-            let program = jaleo::Program::credits()?;
-            let transitions = jaleo::execution(&program, &fee_function, &inputs, private_key, rng)?;
+            let program = vm::Program::credits()?;
+            let transitions = vm::execution(program, fee_function, &inputs, private_key)?;
             Ok(Some(transitions.first().unwrap().clone()))
         } else {
             Ok(None)

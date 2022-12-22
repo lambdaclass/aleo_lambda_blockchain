@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{jaleo, vm};
+use crate::vm;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// shared between the network and clients without extra work, like the credits program.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProgramFile {
-    program: jaleo::Program,
+    program: vm::Program,
     keys: vm::ProgramBuild,
 }
 
@@ -28,7 +28,7 @@ impl ProgramFile {
         std::fs::write(output_path, json).map_err(|e| anyhow!(e))
     }
 
-    pub fn load(path: &Path) -> Result<(jaleo::Program, vm::ProgramBuild)> {
+    pub fn load(path: &Path) -> Result<(vm::Program, vm::ProgramBuild)> {
         let json = std::fs::read_to_string(path)
             .map_err(|e| anyhow!("couldn't find stored program: {e}"))?;
         let stored: Self = serde_json::from_str(&json)?;

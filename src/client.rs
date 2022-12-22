@@ -211,7 +211,7 @@ fn generate_program(path: &Path) -> Result<Transaction> {
 fn generate_execution(
     path: &Path,
     function_name: vm::Identifier,
-    inputs: &[jaleo::UserInputValueType],
+    inputs: &[vm::UserInputValueType],
     credentials: &account::Credentials,
 ) -> Result<Transaction> {
     let rng = &mut rand::thread_rng();
@@ -232,7 +232,7 @@ fn generate_execution(
 
 fn generate_credits_execution(
     function_name: vm::Identifier,
-    inputs: Vec<jaleo::UserInputValueType>,
+    inputs: Vec<vm::UserInputValueType>,
     credentials: &account::Credentials,
 ) -> Result<Transaction> {
     let rng = &mut rand::thread_rng();

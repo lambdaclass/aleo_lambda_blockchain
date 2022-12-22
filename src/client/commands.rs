@@ -2,11 +2,11 @@ use crate::{account, tendermint};
 use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use itertools::Itertools;
-use lib::jaleo::EncryptedRecord;
 use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
-use lib::{jaleo, vm};
+use lib::vm;
+use lib::vm::EncryptedRecord;
 use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
@@ -41,43 +41,43 @@ pub enum Credits {
     /// Transfer credtis to recipient_address from address that owns the input record
     Transfer {
         #[clap(value_parser=parse_input_record)]
-        input_record: jaleo::UserInputValueType,
+        input_record: vm::UserInputValueType,
         #[clap(value_parser=parse_input_value)]
-        recipient_address: jaleo::UserInputValueType,
+        recipient_address: vm::UserInputValueType,
         #[clap(value_parser=parse_input_value)]
-        amount: jaleo::UserInputValueType,
+        amount: vm::UserInputValueType,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
         fee: Option<u64>,
         /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
         #[clap(long, value_parser=parse_input_record)]
-        fee_record: Option<jaleo::UserInputValueType>,
+        fee_record: Option<vm::UserInputValueType>,
     },
     /// Split input record by amount
     Split {
         #[clap(value_parser=parse_input_record)]
-        input_record: jaleo::UserInputValueType,
+        input_record: vm::UserInputValueType,
         #[clap(value_parser=parse_input_value)]
-        amount: jaleo::UserInputValueType,
+        amount: vm::UserInputValueType,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
         fee: Option<u64>,
         /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
         #[clap(long, value_parser=parse_input_record)]
-        fee_record: Option<jaleo::UserInputValueType>,
+        fee_record: Option<vm::UserInputValueType>,
     },
     /// Combine two records into one
     Combine {
         #[clap(value_parser=parse_input_record)]
-        first_record: jaleo::UserInputValueType,
+        first_record: vm::UserInputValueType,
         #[clap(value_parser=parse_input_record)]
-        second_record: jaleo::UserInputValueType,
+        second_record: vm::UserInputValueType,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
         fee: Option<u64>,
         /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
         #[clap(long, value_parser=parse_input_record)]
-        fee_record: Option<jaleo::UserInputValueType>,
+        fee_record: Option<vm::UserInputValueType>,
     },
 }
 
@@ -94,7 +94,7 @@ pub enum Program {
         fee: Option<u64>,
         /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
         #[clap(long, value_parser=parse_input_record)]
-        fee_record: Option<jaleo::UserInputValueType>,
+        fee_record: Option<vm::UserInputValueType>,
     },
     /// Runs locally and sends an execution transaction to the Blockchain, returning the Transaction ID
     Execute {
@@ -103,16 +103,16 @@ pub enum Program {
         path: PathBuf,
         /// The function name.
         #[clap(value_parser)]
-        function: jaleo::Identifier,
+        function: vm::Identifier,
         /// The function inputs.
         #[clap(value_parser=parse_input_value)]
-        inputs: Vec<jaleo::UserInputValueType>,
+        inputs: Vec<vm::UserInputValueType>,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
         fee: Option<u64>,
         /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
         #[clap(long, value_parser=parse_input_record)]
-        fee_record: Option<jaleo::UserInputValueType>,
+        fee_record: Option<vm::UserInputValueType>,
     },
     /// Builds an .aleo program's keys and saves them to an .avm file
     Build {
@@ -236,15 +236,14 @@ impl Command {
                     if !decrypt {
                         json!(transaction)
                     } else {
-                        let records: Vec<jaleo::Record> = transaction
+                        let records: Vec<vm::Record> = transaction
                             .output_records()
                             .iter()
                             .filter(|record| {
                                 // The above turns a snarkVM address into an address that is
                                 // useful for the vm. This should change a little when we support
                                 // our own addresses.
-                                let address =
-                                    vm::helpers::to_address(credentials.address.to_string());
+                                let address = vm::to_address(credentials.address.to_string());
                                 record.is_owner(&address, &credentials.view_key)
                             })
                             .filter_map(|record| record.decrypt(&credentials.view_key).ok())
@@ -264,7 +263,7 @@ impl Command {
 }
 
 impl Credits {
-    pub fn inputs(&self) -> Vec<jaleo::UserInputValueType> {
+    pub fn inputs(&self) -> Vec<vm::UserInputValueType> {
         match self {
             Credits::Transfer {
                 input_record,
@@ -289,15 +288,15 @@ impl Credits {
         }
     }
 
-    pub fn identifier(&self) -> Result<jaleo::Identifier> {
+    pub fn identifier(&self) -> Result<vm::Identifier> {
         match self {
-            Credits::Combine { .. } => jaleo::Identifier::try_from("combine"),
-            Credits::Split { .. } => jaleo::Identifier::try_from("split"),
-            Credits::Transfer { .. } => jaleo::Identifier::try_from("transfer"),
+            Credits::Combine { .. } => vm::Identifier::try_from("combine"),
+            Credits::Split { .. } => vm::Identifier::try_from("split"),
+            Credits::Transfer { .. } => vm::Identifier::try_from("transfer"),
         }
     }
 
-    pub fn fee(&self) -> (Option<u64>, Option<jaleo::UserInputValueType>) {
+    pub fn fee(&self) -> (Option<u64>, Option<vm::UserInputValueType>) {
         match self {
             Credits::Transfer {
                 fee, fee_record, ..
@@ -313,7 +312,7 @@ impl Credits {
 }
 
 /// Extends the snarkvm's default argument parsing to support using record ciphertexts as record inputs
-fn parse_input_value(input: &str) -> Result<jaleo::UserInputValueType> {
+fn parse_input_value(input: &str) -> Result<vm::UserInputValueType> {
     // try parsing an encrypted record string
     if input.starts_with("record") {
         return parse_input_record(input);
@@ -323,12 +322,12 @@ fn parse_input_value(input: &str) -> Result<jaleo::UserInputValueType> {
     if input == "%account" {
         let credentials = account::Credentials::load()?;
         let address = credentials.address.to_string();
-        return jaleo::UserInputValueType::try_from(address);
+        return vm::UserInputValueType::try_from(address);
     }
 
     // try parsing a jsonified plaintext record
-    if let Ok(record) = serde_json::from_str::<jaleo::Record>(input) {
-        return Ok(jaleo::UserInputValueType::Record(jaleo::Record {
+    if let Ok(record) = serde_json::from_str::<vm::Record>(input) {
+        return Ok(vm::UserInputValueType::Record(vm::Record {
             owner: record.owner,
             gates: record.gates,
             entries: record.entries,
@@ -336,15 +335,15 @@ fn parse_input_value(input: &str) -> Result<jaleo::UserInputValueType> {
         }));
     }
     // otherwise fallback to parsing a snarkvm literal
-    jaleo::UserInputValueType::try_from(input.to_string())
+    vm::UserInputValueType::try_from(input.to_string())
 }
 
-pub fn parse_input_record(input: &str) -> Result<jaleo::UserInputValueType> {
+pub fn parse_input_record(input: &str) -> Result<vm::UserInputValueType> {
     let ciphertext: EncryptedRecord = serde_json::from_str(input)?;
     let credentials = account::Credentials::load()?;
     ciphertext
         .decrypt(&credentials.view_key)
-        .map(jaleo::UserInputValueType::Record)
+        .map(vm::UserInputValueType::Record)
 }
 
 /// Retrieves all records from the blockchain, and only those that are correctly decrypted
@@ -352,13 +351,13 @@ pub fn parse_input_record(input: &str) -> Result<jaleo::UserInputValueType> {
 async fn get_records(
     credentials: &account::Credentials,
     url: &str,
-) -> Result<Vec<(jaleo::Field, jaleo::Record, jaleo::Record)>> {
+) -> Result<Vec<(vm::Field, vm::Record, vm::Record)>> {
     let get_records_response = tendermint::query(AbciQuery::GetRecords.into(), url).await?;
     let get_spent_records_response =
         tendermint::query(AbciQuery::GetSpentSerialNumbers.into(), url).await?;
 
-    let records: Vec<(jaleo::Field, jaleo::Record)> = bincode::deserialize(&get_records_response)?;
-    let spent_records: HashSet<jaleo::Field> = bincode::deserialize(&get_spent_records_response)?;
+    let records: Vec<(vm::Field, vm::Record)> = bincode::deserialize(&get_records_response)?;
+    let spent_records: HashSet<vm::Field> = bincode::deserialize(&get_spent_records_response)?;
 
     debug!("Records: {:?}", records);
     let records = records
@@ -385,15 +384,15 @@ async fn choose_fee_record(
     credentials: &account::Credentials,
     url: &str,
     amount: &Option<u64>,
-    record: &Option<jaleo::UserInputValueType>,
-    inputs: &[jaleo::UserInputValueType],
-) -> Result<Option<(u64, jaleo::Record)>> {
+    record: &Option<vm::UserInputValueType>,
+    inputs: &[vm::UserInputValueType],
+) -> Result<Option<(u64, vm::Record)>> {
     if amount.is_none() {
         return Ok(None);
     }
     let amount = amount.unwrap();
 
-    if let Some(jaleo::UserInputValueType::Record(jaleo::Record {
+    if let Some(vm::UserInputValueType::Record(vm::Record {
         owner,
         gates,
         entries,
@@ -402,11 +401,11 @@ async fn choose_fee_record(
     {
         return Ok(Some((
             amount,
-            jaleo::Record::new(*owner, *gates, entries.clone(), Some(*nonce)),
+            vm::Record::new(*owner, *gates, entries.clone(), Some(*nonce)),
         )));
     }
 
-    let account_records: Vec<jaleo::Record> = get_records(credentials, url)
+    let account_records: Vec<vm::Record> = get_records(credentials, url)
         .await?
         .into_iter()
         .map(|(_, _, record)| record)
@@ -421,21 +420,21 @@ async fn choose_fee_record(
 /// that choosing the best fit would lead to record fragmentation.
 fn select_default_fee_record(
     amount: u64,
-    inputs: &[jaleo::UserInputValueType],
-    account_records: &[jaleo::Record],
-) -> Result<jaleo::Record> {
+    inputs: &[vm::UserInputValueType],
+    account_records: &[vm::Record],
+) -> Result<vm::Record> {
     // save the input records to make sure that we don't use one of the other execution inputs as the fee
     let input_records: HashSet<String> = inputs
         .iter()
         .filter_map(|value| {
-            if let jaleo::UserInputValueType::Record(jaleo::Record {
+            if let vm::UserInputValueType::Record(vm::Record {
                 owner,
                 gates,
                 entries,
                 nonce,
             }) = value
             {
-                Some(jaleo::Record::new(*owner, *gates, entries.clone(), Some(*nonce)).to_string())
+                Some(vm::Record::new(*owner, *gates, entries.clone(), Some(*nonce)).to_string())
             } else {
                 None
             }
@@ -466,9 +465,9 @@ mod tests {
 
     #[test]
     fn select_default_record() {
-        let private_key = jaleo::PrivateKey::new(&mut rand::thread_rng()).unwrap();
-        let view_key = jaleo::ViewKey::try_from(&private_key).unwrap();
-        let address = jaleo::Address::try_from(&view_key).unwrap();
+        let private_key = vm::PrivateKey::new(&mut rand::thread_rng()).unwrap();
+        let view_key = vm::ViewKey::try_from(&private_key).unwrap();
+        let address = vm::Address::try_from(&view_key).unwrap();
 
         let record10 = mint_record(&address, &view_key, 10);
         let record5 = mint_record(&address, &view_key, 5);
@@ -496,7 +495,7 @@ mod tests {
         // if one record but also input, fail
         let error = select_default_fee_record(
             5,
-            &[jaleo::UserInputValueType::Record(jaleo::Record {
+            &[vm::UserInputValueType::Record(vm::Record {
                 owner: record6.owner,
                 gates: record6.gates,
                 entries: record6.entries.clone(),
@@ -521,7 +520,7 @@ mod tests {
 
         let result = select_default_fee_record(
             5,
-            &[jaleo::UserInputValueType::Record(jaleo::Record {
+            &[vm::UserInputValueType::Record(vm::Record {
                 owner: record10.owner,
                 gates: record10.gates,
                 entries: record10.entries.clone(),
@@ -533,12 +532,8 @@ mod tests {
         assert_eq!(record6, result);
     }
 
-    fn mint_record(
-        address: &jaleo::Address,
-        view_key: &jaleo::ViewKey,
-        amount: u64,
-    ) -> jaleo::Record {
-        jaleo::mint_credits(address, amount)
+    fn mint_record(address: &vm::Address, view_key: &vm::ViewKey, amount: u64) -> vm::Record {
+        vm::mint_credits(address, amount)
             .unwrap()
             .1
             .decrypt(view_key)

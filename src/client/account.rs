@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use lib::jaleo;
+use lib::vm;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -9,16 +9,16 @@ use std::str::FromStr;
 /// Stores it at $ALEO_HOME/account.json, with ~/.aleo as the default ALEO_HOME.
 #[derive(Serialize, Deserialize)]
 pub struct Credentials {
-    pub private_key: jaleo::PrivateKey,
-    pub view_key: jaleo::ViewKey,
-    pub address: jaleo::Address,
+    pub private_key: vm::PrivateKey,
+    pub view_key: vm::ViewKey,
+    pub address: vm::Address,
 }
 
 impl Credentials {
     pub fn new() -> Result<Self> {
-        let private_key = jaleo::PrivateKey::new(&mut rand::thread_rng())?;
-        let view_key = jaleo::ViewKey::try_from(&private_key)?;
-        let address = jaleo::Address::try_from(&view_key)?;
+        let private_key = vm::PrivateKey::new(&mut rand::thread_rng())?;
+        let view_key = vm::ViewKey::try_from(&private_key)?;
+        let address = vm::Address::try_from(&view_key)?;
         Ok(Self {
             private_key,
             view_key,

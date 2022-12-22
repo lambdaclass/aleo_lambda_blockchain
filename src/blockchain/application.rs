@@ -4,9 +4,8 @@ use crate::record_store::RecordStore;
 use crate::{program_store::ProgramStore, validator_set::ValidatorSet};
 use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
-use lib::jaleo;
 use lib::query::AbciQuery;
-use lib::{transaction::Transaction, GenesisState};
+use lib::{transaction::Transaction, vm, GenesisState};
 use tendermint_abci::Application;
 use tendermint_proto::abci;
 
@@ -349,7 +348,7 @@ impl SnarkVMApp {
                 }
 
                 // verify deployment is correct and keys are valid
-                jaleo::verify_deployment(program, verifying_keys.clone())
+                vm::verify_deployment(program, verifying_keys.clone())
             }
             Transaction::Execution { transitions, .. } => {
                 ensure!(
@@ -372,12 +371,12 @@ impl SnarkVMApp {
     }
 
     /// Check the given execution transition with the verifying keys from the program store
-    fn verify_transition(&self, transition: &jaleo::Transition) -> Result<()> {
+    fn verify_transition(&self, transition: &vm::Transition) -> Result<()> {
         let stored_keys = self.programs.get(&transition.program_id)?;
 
         // only verify if we have the program available
         if let Some((_program, keys)) = stored_keys {
-            jaleo::verify_execution(transition, &keys)
+            vm::verify_execution(transition, &keys)
         } else {
             bail!(format!("Program {} does not exist", transition.program_id))
         }

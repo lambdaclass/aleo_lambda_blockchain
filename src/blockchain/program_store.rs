@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use indexmap::IndexMap;
-use lib::jaleo::{self, Program, ProgramID, VerifyingKeyMap};
+use lib::vm::{self, Program, ProgramID, VerifyingKeyMap};
 use log::{debug, error};
 use std::str::FromStr;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
@@ -127,7 +127,7 @@ impl ProgramStore {
             let mut key_map = IndexMap::new();
 
             for (function_name, _function) in credits_program.functions() {
-                let (_, verifying_key) = jaleo::get_credits_key(&credits_program, function_name)?;
+                let (_, verifying_key) = vm::get_credits_key(&credits_program, function_name)?;
                 key_map.insert(function_name.to_string(), verifying_key);
             }
 
@@ -143,7 +143,7 @@ impl ProgramStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lib::{jaleo, vm};
+    use lib::vm;
     use std::{fs, str::FromStr};
 
     #[ctor::ctor]
@@ -197,7 +197,7 @@ mod tests {
         assert!(store.exists(&program.id().to_string()));
     }
 
-    fn store_program(program_store: &ProgramStore, path: &str) -> Result<jaleo::Program> {
+    fn store_program(program_store: &ProgramStore, path: &str) -> Result<vm::Program> {
         let program_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
 
         let program_string = fs::read_to_string(program_path).unwrap();

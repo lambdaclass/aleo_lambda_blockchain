@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lib::jaleo;
+use lib::vm;
 use log::{debug, error, warn};
 
 type TendermintAddress = Vec<u8>;
@@ -21,7 +21,7 @@ const PROPOSER_REWARD_PERCENTAGE: u64 = 50;
 #[derive(Debug)]
 pub struct ValidatorSet {
     path: &'static str,
-    validators: HashMap<TendermintAddress, jaleo::Address>,
+    validators: HashMap<TendermintAddress, vm::Address>,
     fees: Fee,
     current_proposer: Option<TendermintAddress>,
     current_votes: HashMap<TendermintAddress, VotingPower>,
@@ -33,7 +33,7 @@ impl ValidatorSet {
     /// otherwise start with an empty one.
     pub fn new(path: &'static str) -> Self {
         let validators = if let Ok(json) = std::fs::read_to_string(path) {
-            serde_json::from_str::<HashMap<String, jaleo::Address>>(&json)
+            serde_json::from_str::<HashMap<String, vm::Address>>(&json)
                 .expect("validators file content is invalid")
                 .into_iter()
                 .map(|(tmint_hex_address, aleo_address)| {
@@ -56,7 +56,7 @@ impl ValidatorSet {
 
     /// Replace the entire validator set with the given tendermint to aleo address mapping.
     /// The mapping is stored to a validators file to pick up across node restarts.
-    pub fn set_validators(&mut self, addresses: HashMap<String, jaleo::Address>) {
+    pub fn set_validators(&mut self, addresses: HashMap<String, vm::Address>) {
         std::fs::write(self.path, serde_json::to_string(&addresses).unwrap()).unwrap();
         let addresses = addresses
             .into_iter()
@@ -105,7 +105,7 @@ impl ValidatorSet {
     /// weighted by their voting power (which is assumed to be proportional to its stake).
     /// If there are credits left because of rounding errors when dividing by voting power,
     /// they are assigned to the proposer.
-    pub fn rewards(&self) -> Vec<(jaleo::Field, jaleo::EncryptedRecord)> {
+    pub fn rewards(&self) -> Vec<(vm::Field, vm::EncryptedRecord)> {
         if let Some(proposer) = &self.current_proposer {
             // first calculate which part of the total belongs to voters
             let voter_reward_percentage = 100 - PROPOSER_REWARD_PERCENTAGE;
@@ -155,7 +155,7 @@ impl ValidatorSet {
                     "Assigning {credits} credits to {aleo_address} (voting power {})",
                     self.current_votes.get(address).unwrap()
                 );
-                let record = jaleo::mint_credits(&aleo_address, credits)
+                let record = vm::mint_credits(&aleo_address, credits)
                     .expect("Couldn't mint credit records for reward");
                 output_records.push(record);
             }
@@ -347,16 +347,16 @@ mod tests {
         assert_eq!(0, rewards2);
     }
 
-    pub fn account_keys() -> (jaleo::ViewKey, jaleo::Address) {
-        let private_key = jaleo::PrivateKey::new(&mut rand::thread_rng()).unwrap();
-        let view_key = jaleo::ViewKey::try_from(&private_key).unwrap();
-        let address = jaleo::Address::try_from(&view_key).unwrap();
+    pub fn account_keys() -> (vm::ViewKey, vm::Address) {
+        let private_key = vm::PrivateKey::new(&mut rand::thread_rng()).unwrap();
+        let view_key = vm::ViewKey::try_from(&private_key).unwrap();
+        let address = vm::Address::try_from(&view_key).unwrap();
         (view_key, address)
     }
 
     fn decrypt_rewards(
-        owner: &(jaleo::ViewKey, jaleo::Address),
-        rewards: &[(jaleo::Field, jaleo::EncryptedRecord)],
+        owner: &(vm::ViewKey, vm::Address),
+        rewards: &[(vm::Field, vm::EncryptedRecord)],
     ) -> u64 {
         rewards
             .iter()
@@ -364,7 +364,7 @@ mod tests {
                 // The above turns a snarkVM address into an address that is
                 // useful for the vm. This should change a little when we support
                 // our own addresses.
-                let address = vm::helpers::to_address(owner.1.to_string());
+                let address = vm::to_address(owner.1.to_string());
                 record.is_owner(&address, &owner.0)
             })
             .fold(0, |acc, (_, record)| {

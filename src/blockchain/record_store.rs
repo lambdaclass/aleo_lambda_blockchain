@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use lib::jaleo::{self, EncryptedRecord, Field};
+use lib::vm::{self, EncryptedRecord, Field};
 use log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use std::collections::{HashMap, HashSet};
@@ -19,10 +19,7 @@ type Value = Vec<u8>;
 /// Internal channel reply for the scan command
 type ScanReply = (Vec<(Key, Value)>, Option<Key>);
 /// Public return type for the scan command.
-type ScanResult = (
-    Vec<(Commitment, jaleo::EncryptedRecord)>,
-    Option<SerialNumber>,
-);
+type ScanResult = (Vec<(Commitment, vm::EncryptedRecord)>, Option<SerialNumber>);
 
 /// The record store tracks the known unspent and spent record sets (similar to bitcoin's UTXO set)
 /// according to the transactions that are committed to the ledger.
@@ -183,7 +180,7 @@ impl RecordStore {
     }
 
     /// Saves a new unspent record to the write buffer
-    pub fn add(&self, commitment: Commitment, record: jaleo::EncryptedRecord) -> Result<()> {
+    pub fn add(&self, commitment: Commitment, record: vm::EncryptedRecord) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         let commitment = commitment.into_bytes();
@@ -239,7 +236,7 @@ impl RecordStore {
             .map(|(commitment, record)| {
                 let commitment =
                     Commitment::from_str(&String::from_utf8_lossy(commitment)).unwrap();
-                let record: jaleo::EncryptedRecord =
+                let record: EncryptedRecord =
                     serde_json::from_str(&String::from_utf8_lossy(record)).unwrap();
                 (commitment, record)
             })
@@ -270,11 +267,10 @@ mod tests {
     use std::fs;
 
     use indexmap::IndexMap;
-    use lib::jaleo::{PrivateKey, ViewKey};
+    use lib::vm::{PrivateKey, ViewKey};
     use vmtropy::helpers::to_address;
 
     use super::*;
-    type PublicRecord = lib::jaleo::Record;
 
     #[ctor::ctor]
     fn init() {
