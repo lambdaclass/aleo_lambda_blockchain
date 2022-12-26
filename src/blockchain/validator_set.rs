@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
 use lib::vm;
 use log::{debug, error, warn};
-use sha2::{Digest, Sha256};
 
-type TendermintAddress = Vec<u8>;
-type VotingPower = u64;
+use lib::validator::{Address, Validator, VotingPower};
+
 type Fee = u64;
 
 /// There's a baseline for the credits distributed among validators, in addition to fees.
@@ -17,16 +15,16 @@ const BASELINE_BLOCK_REWARD: Fee = 100;
 const PROPOSER_REWARD_PERCENTAGE: u64 = 50;
 
 /// Tracks the network validator set, particularly how the tendermint addresses map to
-/// aleo acount addresses needed to assign credits records for validator rewards.
+/// aleo account addresses needed to assign credits records for validator rewards.
 /// The ValidatorSet exposes methods to collect fees and has logic to distribute them
 /// (in addition to a baseline reward), based on block proposer and voting power.
 #[derive(Debug)]
 pub struct ValidatorSet {
     path: &'static str,
-    validators: HashMap<TendermintAddress, vm::Address>,
+    validators: HashMap<Address, Validator>,
     fees: Fee,
-    current_proposer: Option<TendermintAddress>,
-    current_votes: HashMap<TendermintAddress, VotingPower>,
+    current_proposer: Option<Address>,
+    current_votes: HashMap<Address, VotingPower>,
     current_height: u64,
 }
 
@@ -35,18 +33,12 @@ impl ValidatorSet {
     /// otherwise start with an empty one.
     pub fn new(path: &'static str) -> Self {
         let validators = if let Ok(json) = std::fs::read_to_string(path) {
-            serde_json::from_str::<HashMap<String, vm::Address>>(&json)
+            serde_json::from_str::<Vec<Validator>>(&json)
                 .expect("validators file content is invalid")
                 .into_iter()
-                .map(|(tmint_pubkey, aleo_address)| {
-                    let tmint_address = pubkey_to_address(&tmint_pubkey)
-                        .expect("failed to calculate validator hex address");
-                    debug!(
-                        "loading validator {} {}",
-                        hex::encode_upper(&tmint_address),
-                        aleo_address
-                    );
-                    (tmint_address, aleo_address)
+                .map(|validator| {
+                    debug!("loading validator {}", validator);
+                    (validator.address(), validator)
                 })
                 .collect()
         } else {
@@ -65,19 +57,14 @@ impl ValidatorSet {
 
     /// Replace the entire validator set with the given tendermint pubkey to aleo address mapping.
     /// The mapping is stored to a validators file to pick up across node restarts.
-    pub fn set_validators(&mut self, addresses: HashMap<String, vm::Address>) {
-        std::fs::write(self.path, serde_json::to_string(&addresses).unwrap()).unwrap();
-        let addresses = addresses
+    // FIXME redundant name, reconsider
+    pub fn set_validators(&mut self, validators: Vec<Validator>) {
+        std::fs::write(self.path, serde_json::to_string(&validators).unwrap()).unwrap();
+        let addresses = validators
             .into_iter()
-            .map(|(tmint_pubkey, aleo_address)| {
-                let tmint_address = pubkey_to_address(&tmint_pubkey)
-                    .expect("failed to calculate validator hex address");
-                debug!(
-                    "loading validator {} {}",
-                    hex::encode_upper(&tmint_address),
-                    aleo_address
-                );
-                (tmint_address, aleo_address)
+            .map(|validator| {
+                debug!("loading validator {}", validator);
+                (validator.address(), validator)
             })
             .collect();
         self.validators = addresses;
@@ -86,14 +73,14 @@ impl ValidatorSet {
     /// Updates state based on previous commit votes, to know how awards should be assigned.
     pub fn prepare(
         &mut self,
-        proposer: TendermintAddress,
-        votes: HashMap<TendermintAddress, VotingPower>,
+        proposer: &Address,
+        votes: HashMap<Address, VotingPower>,
         height: u64,
     ) {
-        if !self.validators.contains_key(&proposer) {
+        if !self.validators.contains_key(proposer) {
             error!(
                 "received unknown address as proposer {}",
-                hex::encode_upper(&proposer)
+                hex::encode_upper(proposer)
             );
         }
 
@@ -107,7 +94,7 @@ impl ValidatorSet {
         }
 
         self.current_height = height;
-        self.current_proposer = Some(proposer);
+        self.current_proposer = Some(proposer.to_vec());
         self.current_votes = votes;
         self.fees = BASELINE_BLOCK_REWARD;
     }
@@ -165,16 +152,16 @@ impl ValidatorSet {
             // generate credits records based on the rewards
             let mut output_records = Vec::new();
             for (address, credits) in rewards {
-                let aleo_address = *self
+                let validator = self
                     .validators
                     .get(address)
                     .expect("validator address not found");
 
                 debug!(
-                    "Assigning {credits} credits to {aleo_address} (voting power {})",
+                    "Assigning {credits} credits to {validator} (voting power {})",
                     self.current_votes.get(address).unwrap_or(&0)
                 );
-                let record = vm::mint_credits(&aleo_address, credits)
+                let record = vm::mint_credits(&validator.aleo_address, credits)
                     .expect("Couldn't mint credit records for reward");
                 output_records.push(record);
             }
@@ -185,16 +172,6 @@ impl ValidatorSet {
             Vec::new()
         }
     }
-}
-
-/// Coverts a base64 tendermint validator public key (as it appears in the genesis.json)
-/// to its tendermint validator address (as it appears in the block header proposer and votes).
-fn pubkey_to_address(pubkey: &str) -> Result<Vec<u8>> {
-    let bytes = base64::decode(pubkey)?;
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let bytes = hasher.finalize().as_slice()[..20].to_owned();
-    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -221,31 +198,37 @@ mod tests {
         let aleo3 = account_keys();
         let aleo4 = account_keys();
 
-        // create validator set, set validators with voting power
-        let mut validators = ValidatorSet::new("abci.validators.test.1");
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
+        let validator3 = Validator::from_str(tmint3, &aleo3.1.to_string()).unwrap();
+        let validator4 = Validator::from_str(tmint4, &aleo4.1.to_string()).unwrap();
 
-        let mut addresses = HashMap::new();
-        addresses.insert(tmint1.to_string(), aleo1.1);
-        addresses.insert(tmint2.to_string(), aleo2.1);
-        addresses.insert(tmint3.to_string(), aleo3.1);
-        addresses.insert(tmint4.to_string(), aleo4.1);
-        validators.set_validators(addresses);
+        // create validator set, set validators with voting power
+        let mut set = ValidatorSet::new("abci.validators.test.1");
+
+        let validators = vec![
+            validator1.clone(),
+            validator2.clone(),
+            validator3.clone(),
+            validator4.clone(),
+        ];
+        set.set_validators(validators);
 
         // tmint1 is proposer, tmint3 doesn't vote
         let mut votes = HashMap::new();
-        votes.insert(pubkey_to_address(tmint1).unwrap(), 10);
-        votes.insert(pubkey_to_address(tmint2).unwrap(), 15);
-        votes.insert(pubkey_to_address(tmint3).unwrap(), 25);
+        votes.insert(validator1.address(), 10);
+        votes.insert(validator2.address(), 15);
+        votes.insert(validator3.address(), 25);
         let voting_power = 10 + 15 + 25;
-        validators.prepare(pubkey_to_address(tmint1).unwrap(), votes, 1);
+        set.prepare(&validator1.address(), votes, 1);
 
         // add fees
-        validators.add(20);
-        validators.add(35);
+        set.add(20);
+        set.add(35);
         let fees = 20 + 35;
 
         // get rewards
-        let records = validators.rewards();
+        let records = set.rewards();
         let rewards1 = decrypt_rewards(&aleo1, &records);
         let rewards2 = decrypt_rewards(&aleo2, &records);
         let rewards3 = decrypt_rewards(&aleo3, &records);
@@ -269,11 +252,11 @@ mod tests {
 
         // run another block with different votes, rewards start from scratch
         let mut votes = HashMap::new();
-        votes.insert(pubkey_to_address(tmint4).unwrap(), 10);
-        validators.prepare(pubkey_to_address(tmint4).unwrap(), votes, 2);
-        validators.add(10);
+        votes.insert(validator4.address(), 10);
+        set.prepare(&validator4.address(), votes, 2);
+        set.add(10);
 
-        let records = validators.rewards();
+        let records = set.rewards();
         let rewards1 = decrypt_rewards(&aleo1, &records);
         let rewards2 = decrypt_rewards(&aleo2, &records);
         let rewards3 = decrypt_rewards(&aleo3, &records);
@@ -292,30 +275,29 @@ mod tests {
 
         let tmint1 = "vM+mkdPMvplfxO7wM57z4FXy0TlBC2Onb+MaqcXE8ig=";
         let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
-
         let aleo1 = account_keys();
         let aleo2 = account_keys();
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
 
         // create validator set, set validators with voting power
-        let mut validators = ValidatorSet::new("abci.validators.test.1");
+        let mut set = ValidatorSet::new("abci.validators.test.1");
 
-        let mut addresses = HashMap::new();
-        addresses.insert(tmint1.to_string(), aleo1.1);
-        addresses.insert(tmint2.to_string(), aleo2.1);
-        validators.set_validators(addresses);
+        let validators = vec![validator1.clone(), validator2.clone()];
+        set.set_validators(validators);
 
         // tmint1 is proposer and didn't vote
         let mut votes = HashMap::new();
-        votes.insert(pubkey_to_address(tmint2).unwrap(), 15);
+        votes.insert(validator2.address(), 15);
         let voting_power = 15;
-        validators.prepare(pubkey_to_address(tmint1).unwrap(), votes, 1);
+        set.prepare(&validator1.address(), votes, 1);
 
         // add fees
-        validators.add(35);
+        set.add(35);
         let fees = 35;
 
         // get rewards
-        let records = validators.rewards();
+        let records = set.rewards();
         let rewards1 = decrypt_rewards(&aleo1, &records);
         let rewards2 = decrypt_rewards(&aleo2, &records);
 
@@ -339,27 +321,31 @@ mod tests {
         let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
         let aleo1 = account_keys();
         let aleo2 = account_keys();
-        let mut addresses = HashMap::new();
-        addresses.insert(tmint1.to_string(), aleo1.1);
-        addresses.insert(tmint2.to_string(), aleo2.1);
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
+        let validators = vec![validator1.clone(), validator2.clone()];
 
-        let mut validators1 = ValidatorSet::new("abci.validators.test.2");
-        let mut validators2 = ValidatorSet::new("abci.validators.test.3");
-        validators1.set_validators(addresses.clone());
-        validators2.set_validators(addresses);
+        let mut set1 = ValidatorSet::new("abci.validators.test.2");
+        let mut set2 = ValidatorSet::new("abci.validators.test.3");
+        set1.set_validators(validators.clone());
+        set2.set_validators(validators);
 
         let mut votes = HashMap::new();
-        votes.insert(pubkey_to_address(tmint1).unwrap(), 10);
-        votes.insert(pubkey_to_address(tmint2).unwrap(), 15);
-        validators1.prepare(pubkey_to_address(tmint1).unwrap(), votes.clone(), 1);
-        validators2.prepare(pubkey_to_address(tmint1).unwrap(), votes.clone(), 1);
-        validators1.add(100);
-        validators2.add(100);
+        votes.insert(validator1.address(), 10);
+        votes.insert(validator2.address(), 15);
+        set1.prepare(&validator1.address(), votes.clone(), 1);
+        set2.prepare(&validator1.address(), votes.clone(), 1);
+        set1.add(100);
+        set2.add(100);
 
-        let mut records11 = validators1.rewards();
-        let mut records21 = validators2.rewards();
-        records11.sort_by_key(|k| k.0.to_owned());
-        records21.sort_by_key(|k| k.0.to_owned());
+        let mut records11 = set1.rewards();
+        let mut records21 = set2.rewards();
+        records11.sort_by_key(|(commitment, _value)| {
+            commitment.clone()
+        });
+        records21.sort_by_key(|(commitment, _value)| {
+            commitment.clone()
+        });
 
         // check that the records generated by both validators are the same
         // regardless of the nonce component of the records
@@ -367,15 +353,19 @@ mod tests {
 
         // prepare another block with the same fees, verify that even though
         // the record amounts are the same, the records themselves are not
-        validators1.prepare(pubkey_to_address(tmint1).unwrap(), votes.clone(), 2);
-        validators2.prepare(pubkey_to_address(tmint1).unwrap(), votes.clone(), 2);
-        validators1.add(100);
-        validators2.add(100);
+        set1.prepare(&validator1.address(), votes.clone(), 2);
+        set2.prepare(&validator1.address(), votes.clone(), 2);
+        set1.add(100);
+        set2.add(100);
 
-        let mut records12 = validators1.rewards();
-        let mut records22 = validators2.rewards();
-        records12.sort_by_key(|k| k.0.to_owned());
-        records22.sort_by_key(|k| k.0.to_owned());
+        let mut records12 = set1.rewards();
+        let mut records22 = set2.rewards();
+        records12.sort_by_key(|(commitment, _value)| {
+            commitment.clone()
+        });
+        records22.sort_by_key(|(commitment, _value)| {
+            commitment.clone()
+        });
 
         // both validators see the same for this round
         assert_eq!(records12, records22);
@@ -393,27 +383,26 @@ mod tests {
     fn genesis_rewards() {
         let tmint1 = "vM+mkdPMvplfxO7wM57z4FXy0TlBC2Onb+MaqcXE8ig=";
         let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
-
         let aleo1 = account_keys();
         let aleo2 = account_keys();
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
 
         // create validator set, set validators with voting power
-        let mut validators = ValidatorSet::new("abci.validators.test.1");
+        let mut set = ValidatorSet::new("abci.validators.test.1");
 
-        let mut addresses = HashMap::new();
-        addresses.insert(tmint1.to_string(), aleo1.1);
-        addresses.insert(tmint2.to_string(), aleo2.1);
-        validators.set_validators(addresses);
+        let validators = vec![validator1.clone(), validator2];
+        set.set_validators(validators);
 
         // in genesis there won't be any previous block votes
         let votes = HashMap::new();
-        validators.prepare(pubkey_to_address(tmint1).unwrap(), votes, 1);
+        set.prepare(&validator1.address(), votes, 1);
 
-        validators.add(20);
-        validators.add(35);
+        set.add(20);
+        set.add(35);
         let fees = 20 + 35;
 
-        let records = validators.rewards();
+        let records = set.rewards();
         let rewards1 = decrypt_rewards(&aleo1, &records);
         let rewards2 = decrypt_rewards(&aleo2, &records);
         let total_rewards = BASELINE_BLOCK_REWARD + fees;
@@ -421,16 +410,6 @@ mod tests {
         // proposer takes all
         assert_eq!(total_rewards, rewards1);
         assert_eq!(0, rewards2);
-    }
-
-    #[test]
-    fn tendermint_pubkey_to_address() {
-        let pubkey = "5/AwkEaNRjhol78iXiuAtlt1eLTY4H2KpGqPQbkvbzc=";
-        let expected_address = "FEF304AC915F3A307B227C946AB1AD37A90E400E";
-
-        let address_bytes = pubkey_to_address(pubkey).unwrap();
-        let address = hex::encode_upper(address_bytes);
-        assert_eq!(expected_address, address);
     }
 
     pub fn account_keys() -> (vm::ViewKey, vm::Address) {

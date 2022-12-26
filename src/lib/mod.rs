@@ -1,17 +1,10 @@
-use std::{collections::HashMap, path::PathBuf, str::FromStr};
-
-use serde::{Deserialize, Serialize};
+use std::{path::PathBuf, str::FromStr};
 
 pub mod program_file;
 pub mod query;
 pub mod transaction;
+pub mod validator;
 pub mod vm;
-
-#[derive(Deserialize, Serialize)]
-pub struct GenesisState {
-    pub records: Vec<(vm::Field, vm::EncryptedRecord)>,
-    pub validators: HashMap<String, vm::Address>,
-}
 
 /// Directory to store aleo related files (e.g. account, cached programs). Typically ~/.aleo/
 pub fn aleo_home() -> PathBuf {

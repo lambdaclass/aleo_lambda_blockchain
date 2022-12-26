@@ -1,10 +1,12 @@
 use std::sync::{Arc, Mutex};
 
+use crate::program_store::ProgramStore;
 use crate::record_store::RecordStore;
-use crate::{program_store::ProgramStore, validator_set::ValidatorSet};
+use crate::validator_set::ValidatorSet;
 use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
-use lib::{query::AbciQuery, transaction::Transaction, vm, GenesisState};
+use lib::validator::GenesisState;
+use lib::{query::AbciQuery, transaction::Transaction, vm};
 use tendermint_abci::Application;
 use tendermint_proto::abci;
 
@@ -178,8 +180,9 @@ impl Application for SnarkVMApp {
                 }
             })
             .collect();
+
         self.validators.lock().unwrap().prepare(
-            header.proposer_address.clone(),
+            &header.proposer_address,
             votes,
             header.height as u64,
         );
