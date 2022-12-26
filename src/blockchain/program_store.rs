@@ -130,11 +130,17 @@ impl ProgramStore {
                 key_map.insert(function_name.to_string(), verifying_key);
             }
 
+            #[cfg(feature = "snarkvm_backend")]
+            self.add(&credits_program.id().to_string(), &credits_program, key_map)?;
+
+            #[cfg(feature = "vmtropy_backend")]
             self.add(
                 &credits_program.id().to_string(),
                 &credits_program,
                 &VerifyingKeyMap { map: key_map },
-            )
+            )?;
+
+            Ok(())
         }
     }
 }
@@ -145,6 +151,7 @@ mod tests {
     use lib::vm;
     use lib::vm::Program;
     use std::{fs, str::FromStr};
+    use tendermint::signature::Verifier;
 
     #[ctor::ctor]
     fn init() {
@@ -211,9 +218,7 @@ mod tests {
             .map(|(i, (_, verifying_key))| (i, verifying_key))
             .collect();
 
-        let verifying_keys = VerifyingKeyMap { map: keys };
-
-        program_store.add(&program.id().to_string(), &program, &verifying_keys)?;
+        program_store.add(&program.id().to_string(), &program, &keys)?;
 
         Ok(program)
     }

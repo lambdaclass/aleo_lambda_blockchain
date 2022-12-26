@@ -59,11 +59,22 @@ sha2 = "0.10.6"
 base64 = "0.20.0"
 
 [dependencies.vmtropy]
-git = "https://github.com/Entropy1729/VMtropy.git"
+git = "https://github.com/lambdaclass/VMtropy.git"
 branch = "integration"
+optional = true
+
+[dependencies.snarkvm]
+git = "https://github.com/entropy1729/snarkvm"
+optional = true
 
 [dev-dependencies]
 assert_fs = "1.0.9"
 assert_cmd = "2.0.6"
 retry = "2.0.0"
 ctor = "0.1.23"
+
+[features]
+# default = ["vmtropy_backend"]
+default = ["snarkvm_backend"]
+snarkvm_backend = [ "snarkvm" ]
+vmtropy_backend = [ "vmtropy" ]

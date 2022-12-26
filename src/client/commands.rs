@@ -455,7 +455,7 @@ fn parse_input_value(input: &str) -> Result<vm::UserInputValueType> {
         return Ok(vm::UserInputValueType::Record(vm::Record {
             owner: record.owner,
             gates: record.gates,
-            entries: record.entries,
+            data: record.data,
             nonce: record.nonce,
         }));
     }
@@ -520,13 +520,13 @@ async fn choose_fee_record(
     if let Some(vm::UserInputValueType::Record(vm::Record {
         owner,
         gates,
-        entries,
+        data,
         nonce,
     })) = record
     {
         return Ok(Some((
             amount,
-            vm::Record::new(*owner, *gates, entries.clone(), Some(*nonce)),
+            vm::Record::new(*owner, *gates, data.clone(), Some(*nonce)),
         )));
     }
 
@@ -571,11 +571,11 @@ fn select_default_fee_record(
             if let vm::UserInputValueType::Record(vm::Record {
                 owner,
                 gates,
-                entries,
+                data,
                 nonce,
             }) = value
             {
-                Some(vm::Record::new(*owner, *gates, entries.clone(), Some(*nonce)).to_string())
+                Some(vm::Record::new(*owner, *gates, data.clone(), Some(*nonce)).to_string())
             } else {
                 None
             }
@@ -639,7 +639,7 @@ mod tests {
             &[vm::UserInputValueType::Record(vm::Record {
                 owner: record6.owner,
                 gates: record6.gates,
-                entries: record6.entries.clone(),
+                data: record6.data.clone(),
                 nonce: record6.nonce,
             })],
             &[record6.clone()],
@@ -664,7 +664,7 @@ mod tests {
             &[vm::UserInputValueType::Record(vm::Record {
                 owner: record10.owner,
                 gates: record10.gates,
-                entries: record10.entries.clone(),
+                data: record10.data.clone(),
                 nonce: record10.nonce,
             })],
             &[record5, record10, record6.clone()],

@@ -1,7 +1,6 @@
 use crate::load_credits;
 use crate::vm::{self};
 use anyhow::{ensure, Result};
-use indexmap::IndexMap;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -47,7 +46,7 @@ impl Transaction {
         // generate program keys (proving and verifying) and keep the verifying one for the deploy
         let (program, program_build) = vm::build_program(&program_string)?;
 
-        let verifying_keys: IndexMap<String, crate::vm::VerifyingKey> = program_build
+        let verifying_keys = program_build
             .map
             .into_iter()
             .map(|(i, keys)| (i, keys.1))
@@ -59,9 +58,7 @@ impl Transaction {
             id,
             fee,
             program: Box::new(program),
-            verifying_keys: crate::vm::VerifyingKeyMap {
-                map: verifying_keys,
-            },
+            verifying_keys,
         })
     }
 
@@ -77,7 +74,7 @@ impl Transaction {
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
-        let implicit_fees = transitions.iter().map(|transition| transition.fee).sum();
+        let implicit_fees = transitions.iter().map(|transition| transition.fee()).sum();
         if let Some(transition) = Self::execute_fee(private_key, requested_fee, implicit_fees)? {
             transitions.push(transition);
         }
@@ -104,7 +101,7 @@ impl Transaction {
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
-        let implicit_fees = transitions.iter().map(|transition| transition.fee).sum();
+        let implicit_fees = transitions.iter().map(|transition| transition.fee()).sum();
         if let Some(transition) = Self::execute_fee(private_key, requested_fee, implicit_fees)? {
             transitions.push(transition);
         }
@@ -133,10 +130,20 @@ impl Transaction {
 
     /// If the transaction is an execution, return the list of input record serial numbers
     pub fn record_serial_numbers(&self) -> Vec<vm::Field> {
-        self.transitions()
+        #[cfg(feature = "snarkvm_backend")]
+        return self
+            .transitions()
             .iter()
             .flat_map(|transition| transition.serial_numbers())
-            .collect()
+            .map(|serial_number| *serial_number)
+            .collect();
+
+        #[cfg(feature = "vmtropy_backend")]
+        return self
+            .transitions()
+            .iter()
+            .flat_map(|transition| transition.serial_numbers())
+            .collect();
     }
 
     fn transitions(&self) -> Vec<vm::Transition> {
@@ -158,11 +165,11 @@ impl Transaction {
     pub fn fees(&self) -> i64 {
         match self {
             Transaction::Deployment { fee, .. } => {
-                fee.as_ref().map_or(0, |transition| transition.fee)
+                fee.as_ref().map_or(0, |transition| *transition.fee())
             }
             Transaction::Execution { transitions, .. } => transitions
                 .iter()
-                .fold(0, |acc, transition| acc + transition.fee),
+                .fold(0, |acc, transition| acc + transition.fee()),
         }
     }
 
@@ -187,15 +194,22 @@ impl Transaction {
             }
 
             let gates = gates as i64 - implicit_fee;
+            #[cfg(feature = "vmtropy_backend")]
             let inputs = [
                 vm::UserInputValueType::Record(crate::vm::Record {
                     owner: record.owner,
                     gates: record.gates,
-                    entries: record.entries,
+                    data: record.data,
                     nonce: record.nonce,
                 }),
                 // TODO: Revisit the cast below.
                 vm::UserInputValueType::U64(gates as u64),
+            ];
+
+            #[cfg(feature = "snarkvm_backend")]
+            let inputs = [
+                vm::UserInputValueType::Record(record),
+                vm::UserInputValueType::from_str(&format!("{gates}u64"))?,
             ];
 
             let transitions = Self::execute_credits("fee", &inputs, private_key)?;
@@ -229,7 +243,7 @@ impl std::fmt::Display for Transaction {
                 validator: None,
             } => {
                 let transition = transitions.first().unwrap();
-                write!(f, "Execution({},{id})", transition.program_id)
+                write!(f, "Execution({},{id})", transition.program_id())
             }
             Transaction::Execution {
                 id,
