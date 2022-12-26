@@ -151,7 +151,6 @@ mod tests {
     use lib::vm;
     use lib::vm::Program;
     use std::{fs, str::FromStr};
-    use tendermint::signature::Verifier;
 
     #[ctor::ctor]
     fn init() {
@@ -218,7 +217,11 @@ mod tests {
             .map(|(i, (_, verifying_key))| (i, verifying_key))
             .collect();
 
-        program_store.add(&program.id().to_string(), &program, &keys)?;
+        program_store.add(
+            &program.id().to_string(),
+            &program,
+            &VerifyingKeyMap { map: keys },
+        )?;
 
         Ok(program)
     }

@@ -333,7 +333,7 @@ impl SnarkVMApp {
         transaction
             .output_records()
             .iter()
-            .map(|record| self.records.add(record.commitment()?, record.clone()))
+            .map(|(commitment, record)| self.records.add(commitment.clone(), record.clone()))
             .find(|result| result.is_err())
             .unwrap_or(Ok(()))
     }

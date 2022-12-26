@@ -13,28 +13,21 @@ use vmtropy::VariableType;
 const MAX_INPUTS: usize = 8;
 const MAX_OUTPUTS: usize = 8;
 
-// pub type Address = snarkvm::prelude::Address<Testnet3>;
 pub type Address = vmtropy::jaleo::Address;
 pub type Identifier = vmtropy::jaleo::Identifier;
-// pub type Value = snarkvm::prelude::Value<Testnet3>;
 pub type Program = vmtropy::jaleo::Program;
 pub type ProgramBuild = vmtropy::ProgramBuild;
-// pub type Ciphertext = snarkvm::prelude::Ciphertext<Testnet3>;
 pub type Record = vmtropy::jaleo::Record;
-// type Execution = snarkvm::prelude::Execution<Testnet3>;
 pub type EncryptedRecord = vmtropy::jaleo::EncryptedRecord;
 pub type ViewKey = vmtropy::jaleo::ViewKey;
 pub type PrivateKey = vmtropy::jaleo::PrivateKey;
 pub type Field = vmtropy::jaleo::Field;
-// pub type Origin = snarkvm::prelude::Origin<Testnet3>;
-// pub type Output = snarkvm::prelude::Output<Testnet3>;
 pub type ProgramID = vmtropy::jaleo::ProgramID;
 pub type VerifyingKey = vmtropy::jaleo::VerifyingKey;
 pub type ProvingKey = vmtropy::jaleo::ProvingKey;
 pub type Deployment = vmtropy::jaleo::Deployment;
 pub type Transition = vmtropy::jaleo::Transition;
 pub type VerifyingKeyMap = vmtropy::jaleo::VerifyingKeyMap;
-// pub type VerifyingKeyMap = IndexMap<Identifier, VerifyingKey>;
 
 /// Basic deployment validations
 pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> Result<()> {

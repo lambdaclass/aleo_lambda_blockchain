@@ -397,14 +397,14 @@ impl Command {
         transaction
             .output_records()
             .iter()
-            .filter(|record| {
+            .filter(|(_commitment, record)| {
                 // The above turns a snarkVM address into an address that is
                 // useful for the vm. This should change a little when we support
                 // our own addresses.
                 let address = vm::to_address(credentials.address.to_string());
                 record.is_owner(&address, &credentials.view_key)
             })
-            .filter_map(|record| record.decrypt(&credentials.view_key).ok())
+            .filter_map(|(_commitment, record)| record.decrypt(&credentials.view_key).ok())
             .collect()
     }
 }
@@ -476,12 +476,13 @@ pub fn parse_input_record(input: &str) -> Result<vm::UserInputValueType> {
 async fn get_records(
     credentials: &account::Credentials,
     url: &str,
-) -> Result<Vec<(vm::Field, vm::Record, vm::Record)>> {
+) -> Result<Vec<(vm::Field, vm::EncryptedRecord, vm::Record)>> {
     let get_records_response = tendermint::query(AbciQuery::GetRecords.into(), url).await?;
     let get_spent_records_response =
         tendermint::query(AbciQuery::GetSpentSerialNumbers.into(), url).await?;
 
-    let records: Vec<(vm::Field, vm::Record)> = bincode::deserialize(&get_records_response)?;
+    let records: Vec<(vm::Field, vm::EncryptedRecord)> =
+        bincode::deserialize(&get_records_response)?;
     let spent_records: HashSet<vm::Field> = bincode::deserialize(&get_spent_records_response)?;
 
     debug!("Records: {:?}", records);

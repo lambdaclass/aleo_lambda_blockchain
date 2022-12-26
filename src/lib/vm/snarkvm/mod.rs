@@ -41,6 +41,12 @@ pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Transition = snarkvm::prelude::Transition<Testnet3>;
 pub type VerifyingKeyMap = IndexMap<Identifier, VerifyingKey>;
 
+// TODO: EXPLAIN THIS
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VerifyingKeyMap {
+    pub map: IndexMap<Identifier, VerifyingKey>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProgramBuild {
     pub map: IndexMap<Identifier, (ProvingKey, VerifyingKey)>,

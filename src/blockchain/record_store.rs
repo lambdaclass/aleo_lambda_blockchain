@@ -267,7 +267,7 @@ mod tests {
     use std::fs;
 
     use indexmap::IndexMap;
-    use lib::vm::{PrivateKey, ViewKey};
+    use lib::vm::{compute_serial_number, PrivateKey, Record, ViewKey};
     use vmtropy::helpers::to_address;
 
     use super::*;

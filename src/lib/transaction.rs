@@ -1,5 +1,5 @@
 use crate::load_credits;
-use crate::vm::{self};
+use crate::vm::{self, VerifyingKeyMap};
 use anyhow::{ensure, Result};
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -58,7 +58,9 @@ impl Transaction {
             id,
             fee,
             program: Box::new(program),
-            verifying_keys,
+            verifying_keys: VerifyingKeyMap {
+                map: verifying_keys,
+            },
         })
     }
 
@@ -121,11 +123,22 @@ impl Transaction {
         }
     }
 
-    pub fn output_records(&self) -> Vec<vm::EncryptedRecord> {
-        self.transitions()
+    pub fn output_records(&self) -> Vec<(vm::Field, vm::EncryptedRecord)> {
+        #[cfg(feature = "snarkvm_backend")]
+        return self
+            .transitions()
             .iter()
             .flat_map(|transition| transition.output_records())
-            .collect()
+            .map(|(commitment, record)| (*commitment, record.clone()))
+            .collect();
+
+        #[cfg(feature = "vmtropy_backend")]
+        return self
+            .transitions()
+            .iter()
+            .flat_map(|transition| transition.output_records())
+            .map(|record| (record.commitment.clone(), record))
+            .collect();
     }
 
     /// If the transaction is an execution, return the list of input record serial numbers
@@ -134,8 +147,7 @@ impl Transaction {
         return self
             .transitions()
             .iter()
-            .flat_map(|transition| transition.serial_numbers())
-            .map(|serial_number| *serial_number)
+            .flat_map(|transition| transition.serial_numbers().copied())
             .collect();
 
         #[cfg(feature = "vmtropy_backend")]
