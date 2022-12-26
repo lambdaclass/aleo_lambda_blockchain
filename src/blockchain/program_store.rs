@@ -1,14 +1,13 @@
 use anyhow::{anyhow, Result};
 use indexmap::IndexMap;
-use lib::vm::{self, Program, ProgramID, VerifyingKeyMap};
+use lib::vm::{self, VerifyingKeyMap};
 use log::{debug, error};
-use std::str::FromStr;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
 
-pub type StoredProgram = (Program, VerifyingKeyMap);
+pub type StoredProgram = (vm::Program, vm::VerifyingKeyMap);
 
-type Key = ProgramID;
+type Key = vm::ProgramID;
 type Value = StoredProgram;
 
 /// The program store tracks programs that have been deployed to the OS
@@ -78,7 +77,7 @@ impl ProgramStore {
     }
 
     /// Returns a program
-    pub fn get(&self, program_id: &ProgramID) -> Result<Option<StoredProgram>> {
+    pub fn get(&self, program_id: &vm::ProgramID) -> Result<Option<StoredProgram>> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender
@@ -90,9 +89,9 @@ impl ProgramStore {
     /// Adds a program to the store
     pub fn add(
         &self,
-        program_id: &ProgramID,
-        program: &Program,
-        verifying_keys: &VerifyingKeyMap,
+        program_id: &vm::ProgramID,
+        program: &vm::Program,
+        verifying_keys: &vm::VerifyingKeyMap,
     ) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
@@ -106,7 +105,7 @@ impl ProgramStore {
     }
 
     /// Returns whether a program ID is already stored
-    pub fn exists(&self, program_id: &ProgramID) -> bool {
+    pub fn exists(&self, program_id: &vm::ProgramID) -> bool {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender
@@ -117,9 +116,9 @@ impl ProgramStore {
     }
 
     fn load_credits(&self) -> Result<()> {
-        let credits_program = Program::credits()?;
+        let (credits_program, _keys) = lib::load_credits();
 
-        if self.exists(&ProgramID::from_str("credits.aleo")?) {
+        if self.exists(&credits_program.id().to_string()) {
             debug!("Credits program already exists in program store");
             Ok(())
         } else {
@@ -144,6 +143,7 @@ impl ProgramStore {
 mod tests {
     use super::*;
     use lib::vm;
+    use lib::vm::Program;
     use std::{fs, str::FromStr};
 
     #[ctor::ctor]

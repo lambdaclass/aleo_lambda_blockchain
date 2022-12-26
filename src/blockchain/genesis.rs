@@ -9,7 +9,7 @@ use lib::{vm, GenesisState};
 
 /// Takes a list of node directories and updates the genesis files on each of them
 /// to include records to assign default credits to each validator and a mapping
-/// of tendermint validator address to aleo account address.
+/// of tendermint validator pubkey to aleo account address.
 #[derive(Debug, Parser)]
 #[clap()]
 pub struct Cli {
@@ -28,7 +28,7 @@ pub struct Cli {
 fn main() -> Result<()> {
     let cli: Cli = Cli::parse();
 
-    // for each node in the testnet, map its tendermint address to its aleo account address
+    // for each node in the testnet, map its tendermint pubkey to its aleo account address
     // and generate records for initial validator credits
     let mut address_map = HashMap::new();
     let mut genesis_records = Vec::new();
@@ -43,9 +43,11 @@ fn main() -> Result<()> {
         let tmint_account_path = node_dir.join("config/priv_validator_key.json");
         let tmint_account: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(tmint_account_path)?)?;
-        let tmint_address = tmint_account["address"].as_str().unwrap();
+        let tmint_pubkey = tmint_account["pub_key"]["value"]
+            .as_str()
+            .expect("couldn't extract pubkey from json");
 
-        address_map.insert(tmint_address.to_string(), aleo_address);
+        address_map.insert(tmint_pubkey.to_string(), aleo_address);
 
         println!("Generating record for {aleo_address}");
         // NOTE: using a hardcoded seed, not for production!

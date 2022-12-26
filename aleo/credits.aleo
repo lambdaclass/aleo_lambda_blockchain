@@ -4,11 +4,9 @@ record credits:
     owner as address.private;
     gates as u64.private;
 
-function genesis:
-    input r0 as address.private;
-    input r1 as u64.private;
-    cast r0 r1 into r2 as credits.record;
-    output r2 as credits.record;
+record staked_credits:
+    owner as address.private;
+    gates as u64.private;
 
 function mint:
     input r0 as address.private;
@@ -48,3 +46,25 @@ function fee:
     sub r0.gates r1 into r2;
     cast r0.owner r2 into r3 as credits.record;
     output r3 as credits.record;
+
+function stake:
+    input r0 as credits.record;
+    input r1 as u64.private;
+    sub r0.gates r1 into r2;
+    cast r0.owner r2 into r3 as credits.record;
+    cast r0.owner r1 into r4 as staked_credits.record;
+    add 0u64 r1 into r5;
+    output r3 as credits.record;
+    output r4 as staked_credits.record;
+    output r5 as u64.public;
+
+function unstake:
+    input r0 as staked_credits.record;
+    input r1 as u64.private;
+    sub r0.gates r1 into r2;
+    cast r0.owner r2 into r3 as staked_credits.record;
+    cast r0.owner r1 into r4 as credits.record;
+    add 0u64 r1 into r5;
+    output r3 as staked_credits.record;
+    output r4 as credits.record;
+    output r5 as u64.public;

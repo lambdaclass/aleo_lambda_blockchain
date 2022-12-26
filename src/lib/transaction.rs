@@ -1,3 +1,4 @@
+use crate::load_credits;
 use crate::vm::{self};
 use anyhow::{ensure, Result};
 use indexmap::IndexMap;
@@ -18,6 +19,18 @@ pub enum Transaction {
     Execution {
         id: String,
         transitions: Vec<vm::Transition>,
+
+        /// The pub key of the tendermint validator that staked credits go to,
+        /// in case this is a staking/unstaking execution.
+        // NOTE: for most purposes the stake/unstake transactions are just another type of/ execution.
+        // we could handle most of the special properties as methods in Transaction, but since the vm
+        // doesn't have support for a type where we could fit the validator address, we need to treat it
+        // as a special case and pass it separately (which also prevents us to include that address in the
+        // execution proof).
+        // also NOTE: having the address out of the record and as a separate field means that we can't ensure
+        // the voting power gets removed from the same tendermint validator that did the staking in the first place.
+        // we may work around that but ideally having the tendermint address in the record would be preferable
+        validator: Option<String>,
     },
 }
 
@@ -54,14 +67,12 @@ impl Transaction {
 
     // Used to generate an execution of a program in path or an execution of the credits program
     pub fn execution(
-        path: &Path,
+        program: vm::Program,
         function_name: vm::Identifier,
         inputs: &[vm::UserInputValueType],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let program_string = fs::read_to_string(path).unwrap();
-        let program = vm::generate_program(&program_string)?;
         let mut transitions = vm::execution(program, function_name, inputs, private_key)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
@@ -73,7 +84,11 @@ impl Transaction {
 
         let id = uuid::Uuid::new_v4().to_string();
 
-        Ok(Self::Execution { id, transitions })
+        Ok(Self::Execution {
+            id,
+            transitions,
+            validator: None,
+        })
     }
 
     pub fn credits_execution(
@@ -81,6 +96,7 @@ impl Transaction {
         inputs: &[vm::UserInputValueType],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
+        validator: Option<String>,
     ) -> Result<Self> {
         let program = vm::Program::credits()?;
 
@@ -94,7 +110,11 @@ impl Transaction {
         }
 
         let id = uuid::Uuid::new_v4().to_string();
-        Ok(Self::Execution { id, transitions })
+        Ok(Self::Execution {
+            id,
+            transitions,
+            validator,
+        })
     }
 
     pub fn id(&self) -> &str {
@@ -167,7 +187,6 @@ impl Transaction {
             }
 
             let gates = gates as i64 - implicit_fee;
-            let fee_function = vm::Identifier::from_str("fee")?;
             let inputs = [
                 vm::UserInputValueType::Record(crate::vm::Record {
                     owner: record.owner,
@@ -179,12 +198,27 @@ impl Transaction {
                 vm::UserInputValueType::U64(gates as u64),
             ];
 
-            let program = vm::Program::credits()?;
-            let transitions = vm::execution(program, fee_function, &inputs, private_key)?;
+            let transitions = Self::execute_credits("fee", &inputs, private_key)?;
             Ok(Some(transitions.first().unwrap().clone()))
         } else {
             Ok(None)
         }
+    }
+
+    fn execute_credits(
+        function: &str,
+        inputs: &[vm::UserInputValueType],
+        private_key: &vm::PrivateKey,
+    ) -> Result<Vec<vm::Transition>> {
+        let function = vm::Identifier::from_str(function)?;
+        let (program, _keys) = load_credits();
+
+        vm::execution(
+            program,
+            function,
+            inputs,
+            private_key,
+        )
     }
 }
 
@@ -194,9 +228,20 @@ impl std::fmt::Display for Transaction {
             Transaction::Deployment { id, program, .. } => {
                 write!(f, "Deployment({},{})", id, program.id())
             }
-            Transaction::Execution { id, transitions } => {
+            Transaction::Execution {
+                id,
+                transitions,
+                validator: None,
+            } => {
                 let transition = transitions.first().unwrap();
                 write!(f, "Execution({},{id})", transition.program_id)
+            }
+            Transaction::Execution {
+                id,
+                validator: Some(validator),
+                ..
+            } => {
+                write!(f, "StakingExecution({id},{validator})")
             }
         }
     }

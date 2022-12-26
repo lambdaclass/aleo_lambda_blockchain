@@ -9,16 +9,13 @@ use serde::{Deserialize, Serialize};
 /// shared between the network and clients without extra work, like the credits program.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProgramFile {
-    program: vm::Program,
-    keys: vm::ProgramBuild,
+    pub program: vm::Program,
+    pub keys: vm::ProgramBuild,
 }
 
 impl ProgramFile {
-    pub fn build(input_path: &Path) -> Result<Self> {
-        let program_str = std::fs::read_to_string(input_path)
-            .map_err(|e| anyhow!("couldn't find program source: {e}"))?;
-
-        let (program, keys) = vm::build_program(&program_str)?;
+    pub fn build(program_source: &str) -> Result<Self> {
+        let (program, keys) = vm::build_program(&program_source)?;
 
         Ok(Self { program, keys })
     }

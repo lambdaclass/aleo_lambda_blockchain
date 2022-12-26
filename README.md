@@ -160,6 +160,10 @@ By default, the CLI client sends every transaction to `http://127.0.0.1:26657`, 
 ### See available CLI parameters
 In order to see all different commands and parameters that the CLI can take, you can run `bin/aleo --help`.
 
+### Execute without changing the state of the blockchain
+
+You can execute programs in the way as you normally would but without sending the proofs to the blockchain by using the `--dry-run` parameter: `program execute aleo/hello.aleo 1u64 1u64 --dry-run`. This will display the same output as normal, and will also attempt to decrypt output records with the active credentials. 
+
 ## Running tests
 
 In order to run tests, make sure the ABCI and the Tendermint Node are currently (`make abci` and `make node` respectively) running locally, and run `make test`.

@@ -6,13 +6,13 @@ use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
 use lib::vm;
-use lib::vm::EncryptedRecord;
+use lib::vm::{EncryptedRecord, ProgramID};
 use log::debug;
 use serde_json::json;
 use std::collections::HashSet;
+use std::fs;
 use std::path::PathBuf;
-
-use std::vec;
+use std::str::FromStr;
 
 #[derive(Debug, Parser)]
 pub enum Command {
@@ -45,7 +45,7 @@ pub enum Credits {
         #[clap(value_parser=parse_input_value)]
         recipient_address: vm::UserInputValueType,
         #[clap(value_parser=parse_input_value)]
-        amount: vm::UserInputValueType,
+        amount: u64,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
         fee: Option<u64>,
@@ -58,7 +58,7 @@ pub enum Credits {
         #[clap(value_parser=parse_input_record)]
         input_record: vm::UserInputValueType,
         #[clap(value_parser=parse_input_value)]
-        amount: vm::UserInputValueType,
+        amount: u64,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
         fee: Option<u64>,
@@ -72,6 +72,43 @@ pub enum Credits {
         first_record: vm::UserInputValueType,
         #[clap(value_parser=parse_input_record)]
         second_record: vm::UserInputValueType,
+        /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
+        #[clap(long)]
+        fee: Option<u64>,
+        /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
+        #[clap(long, value_parser=parse_input_record)]
+        fee_record: Option<vm::UserInputValueType>,
+    },
+    /// Take credits out from a credits record and stake them as a blockchain validator. This will execute a program and output a
+    /// stake record that can be later used to reclaim the staked credits.
+    Stake {
+        /// The amount of gates to stake.
+        #[clap()]
+        amount: u64,
+        /// The credits record to subtract the staked amount from.
+        #[clap(value_parser=parse_input_record)]
+        record: vm::UserInputValueType,
+        /// The tendermint address of the validator that will stake the credits.
+        #[clap()]
+        validator: String,
+        /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
+        #[clap(long)]
+        fee: Option<u64>,
+        /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
+        #[clap(long, value_parser=parse_input_record)]
+        fee_record: Option<vm::UserInputValueType>,
+    },
+    /// Take credits out of a stake record, reducing the voting power of the validator.
+    Unstake {
+        /// The amount of gates to unstake. Should at most what this validator has already staked.
+        #[clap()]
+        amount: u64,
+        /// The stake record to recover the staked amount from.
+        #[clap(value_parser=parse_input_record)]
+        record: vm::UserInputValueType,
+        /// The tendermint address of the validator that is staking the credits.
+        #[clap()]
+        validator: String,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
         fee: Option<u64>,
@@ -96,11 +133,11 @@ pub enum Program {
         #[clap(long, value_parser=parse_input_record)]
         fee_record: Option<vm::UserInputValueType>,
     },
-    /// Runs locally and sends an execution transaction to the Blockchain, returning the Transaction ID
+    /// Runs locally and sends an execution transaction to the blockchain, returning the Transaction ID
     Execute {
-        /// Path where the package resides.
+        /// Program to execute (path or program_id).
         #[clap(value_parser)]
-        path: PathBuf,
+        program: String,
         /// The function name.
         #[clap(value_parser)]
         function: vm::Identifier,
@@ -113,6 +150,9 @@ pub enum Program {
         /// The record to use to subtract the fee amount. If omitted, the record with most gates in the account is used.
         #[clap(long, value_parser=parse_input_record)]
         fee_record: Option<vm::UserInputValueType>,
+        /// Run the input code locally, generating the execution proof but without sending it over to the blockchain. Displays execution and decrypted records.
+        #[clap(long, short, default_value_t = false)]
+        dry_run: bool,
     },
     /// Builds an .aleo program's keys and saves them to an .avm file
     Build {
@@ -185,46 +225,146 @@ impl Command {
                     json!(transaction)
                 }
                 Command::Program(Program::Execute {
-                    path,
+                    program,
                     function,
                     inputs,
                     fee,
                     fee_record,
+                    dry_run,
                 }) => {
                     let fee =
                         choose_fee_record(&credentials, &url, &fee, &fee_record, &inputs).await?;
+                    let program = match get_program(&url, &program).await? {
+                        Some(program) => program,
+                        None => bail!("Could not find program {}", program),
+                    };
                     let transaction = Transaction::execution(
-                        &path,
+                        program,
                         function,
                         &inputs,
                         &credentials.private_key,
                         fee,
                     )?;
-                    let transaction_serialized = bincode::serialize(&transaction).unwrap();
-                    tendermint::broadcast(transaction_serialized, &url).await?;
-                    json!(transaction)
+
+                    let mut transaction_json = json!(transaction);
+                    if !dry_run {
+                        let transaction_serialized = bincode::serialize(&transaction).unwrap();
+                        tendermint::broadcast(transaction_serialized, &url).await?;
+                    } else {
+                        let records = Self::decrypt_records(&transaction, credentials);
+
+                        if !records.is_empty() {
+                            transaction_json
+                                .as_object_mut()
+                                .unwrap()
+                                .insert("decrypted_records".to_string(), json!(records));
+                        }
+                    }
+                    json!(transaction_json)
                 }
                 Command::Program(Program::Build { path }) => {
-                    let program_file = ProgramFile::build(&path)?;
+                    let program_source = std::fs::read_to_string(&path)?;
+                    let program_file = ProgramFile::build(&program_source)?;
                     let output_path = path.with_extension("avm");
                     program_file.save(&output_path)?;
                     json!({ "path": output_path })
                 }
-                Command::Credits(credits) => {
-                    let inputs = credits.inputs();
-                    let (fee_amount, fee_record) = credits.fee();
-                    let fee =
-                        choose_fee_record(&credentials, &url, &fee_amount, &fee_record, &inputs)
-                            .await?;
-                    let transaction = Transaction::credits_execution(
-                        credits.identifier()?,
+                Command::Credits(Credits::Transfer {
+                    input_record,
+                    recipient_address,
+                    amount,
+                    fee,
+                    fee_record,
+                }) => {
+                    let inputs = [
+                        input_record.clone(),
+                        recipient_address.clone(),
+                        u64_to_value(amount),
+                    ];
+                    run_credits_command(
+                        &credentials,
+                        &url,
+                        "transfer",
                         &inputs,
-                        &credentials.private_key,
-                        fee,
-                    )?;
-                    let transaction_serialized = bincode::serialize(&transaction).unwrap();
-                    tendermint::broadcast(transaction_serialized, &url).await?;
-                    json!(transaction)
+                        None,
+                        &fee,
+                        &fee_record,
+                    )
+                    .await?
+                }
+                Command::Credits(Credits::Combine {
+                    first_record,
+                    second_record,
+                    fee,
+                    fee_record,
+                }) => {
+                    let inputs = [first_record.clone(), second_record.clone()];
+                    run_credits_command(
+                        &credentials,
+                        &url,
+                        "combine",
+                        &inputs,
+                        None,
+                        &fee,
+                        &fee_record,
+                    )
+                    .await?
+                }
+                Command::Credits(Credits::Split {
+                    input_record,
+                    amount,
+                    fee,
+                    fee_record,
+                }) => {
+                    let inputs = [input_record.clone(), u64_to_value(amount)];
+                    run_credits_command(
+                        &credentials,
+                        &url,
+                        "split",
+                        &inputs,
+                        None,
+                        &fee,
+                        &fee_record,
+                    )
+                    .await?
+                }
+                Command::Credits(Credits::Stake {
+                    amount,
+                    record,
+                    validator,
+                    fee,
+                    fee_record,
+                }) => {
+                    let inputs = [record.clone(), u64_to_value(amount)];
+                    run_credits_command(
+                        &credentials,
+                        &url,
+                        "stake",
+                        &inputs,
+                        Some(validator),
+                        &fee,
+                        &fee_record,
+                    )
+                    .await?
+                }
+                Command::Credits(Credits::Unstake {
+                    amount,
+                    record,
+                    validator,
+                    fee,
+                    fee_record,
+                }) => {
+                    let inputs = [record.clone(), u64_to_value(amount)];
+                    run_credits_command(
+                        &credentials,
+                        &url,
+                        "unstake",
+                        &inputs,
+                        Some(validator),
+                        &fee,
+                        &fee_record,
+                    )
+                    .await?
                 }
                 Command::Get(Get {
                     transaction_id,
@@ -236,18 +376,7 @@ impl Command {
                     if !decrypt {
                         json!(transaction)
                     } else {
-                        let records: Vec<vm::Record> = transaction
-                            .output_records()
-                            .iter()
-                            .filter(|record| {
-                                // The above turns a snarkVM address into an address that is
-                                // useful for the vm. This should change a little when we support
-                                // our own addresses.
-                                let address = vm::to_address(credentials.address.to_string());
-                                record.is_owner(&address, &credentials.view_key)
-                            })
-                            .filter_map(|record| record.decrypt(&credentials.view_key).ok())
-                            .collect();
+                        let records = Self::decrypt_records(&transaction, credentials);
 
                         json!({
                             "execution": transaction,
@@ -260,55 +389,46 @@ impl Command {
 
         Ok(output)
     }
+
+    fn decrypt_records(
+        transaction: &Transaction,
+        credentials: account::Credentials,
+    ) -> Vec<vm::Record> {
+        transaction
+            .output_records()
+            .iter()
+            .filter(|record| {
+                // The above turns a snarkVM address into an address that is
+                // useful for the vm. This should change a little when we support
+                // our own addresses.
+                let address = vm::to_address(credentials.address.to_string());
+                record.is_owner(&address, &credentials.view_key)
+            })
+            .filter_map(|record| record.decrypt(&credentials.view_key).ok())
+            .collect()
+    }
 }
 
-impl Credits {
-    pub fn inputs(&self) -> Vec<vm::UserInputValueType> {
-        match self {
-            Credits::Transfer {
-                input_record,
-                recipient_address,
-                amount,
-                ..
-            } => vec![
-                input_record.clone(),
-                recipient_address.clone(),
-                amount.clone(),
-            ],
-            Credits::Combine {
-                first_record,
-                second_record,
-                ..
-            } => vec![first_record.clone(), second_record.clone()],
-            Credits::Split {
-                input_record,
-                amount,
-                ..
-            } => vec![input_record.clone(), amount.clone()],
-        }
-    }
+fn u64_to_value(amount: u64) -> vm::UserInputValueType {
+    vm::UserInputValueType::U64(amount)
+}
 
-    pub fn identifier(&self) -> Result<vm::Identifier> {
-        match self {
-            Credits::Combine { .. } => vm::Identifier::try_from("combine"),
-            Credits::Split { .. } => vm::Identifier::try_from("split"),
-            Credits::Transfer { .. } => vm::Identifier::try_from("transfer"),
-        }
-    }
-
-    pub fn fee(&self) -> (Option<u64>, Option<vm::UserInputValueType>) {
-        match self {
-            Credits::Transfer {
-                fee, fee_record, ..
-            } => (*fee, fee_record.clone()),
-            Credits::Split {
-                fee, fee_record, ..
-            } => (*fee, fee_record.clone()),
-            Credits::Combine {
-                fee, fee_record, ..
-            } => (*fee, fee_record.clone()),
-        }
-    }
+async fn run_credits_command(
+    credentials: &account::Credentials,
+    url: &str,
+    function: &str,
+    inputs: &[vm::UserInputValueType],
+    validator: Option<String>,
+    fee_amount: &Option<u64>,
+    fee_record: &Option<vm::UserInputValueType>,
+) -> Result<serde_json::Value> {
+    let fee = choose_fee_record(credentials, url, fee_amount, fee_record, inputs).await?;
+    let function_identifier = vm::Identifier::from_str(function)?;
+    let transaction =
+        Transaction::credits_execution(function_identifier, inputs, &credentials.private_key, fee, validator)?;
+    let transaction_serialized = bincode::serialize(&transaction).unwrap();
+    tendermint::broadcast(transaction_serialized, url).await?;
+    Ok(json!(transaction))
 }
 
 /// Extends the snarkvm's default argument parsing to support using record ciphertexts as record inputs
@@ -412,6 +532,22 @@ async fn choose_fee_record(
         .collect();
 
     select_default_fee_record(amount, inputs, &account_records).map(|record| Some((amount, record)))
+}
+
+async fn get_program(url: &str, program: &str) -> Result<Option<vm::Program>> {
+    match fs::read_to_string(PathBuf::from(program)) {
+        Ok(program_string) => vm::generate_program(&program_string).map(Some),
+        Err(_) => get_program_from_blockchain(url, ProgramID::from_str(program)?).await,
+    }
+}
+
+async fn get_program_from_blockchain(
+    url: &str,
+    program_id: vm::ProgramID,
+) -> Result<Option<vm::Program>> {
+    let result = tendermint::query(AbciQuery::GetProgram { program_id }.into(), url).await?;
+    let program: Option<vm::Program> = bincode::deserialize(&result)?;
+    Ok(program)
 }
 
 /// Select one of the records to be used to pay the requested fee,

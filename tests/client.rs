@@ -24,7 +24,7 @@ fn basic_program() {
     let (_tempfile, home_path, _) = &new_account();
 
     // deploy a program
-    let (_program_file, program_path) = load_program(HELLO_PROGRAM);
+    let (_program_file, program_path, _) = load_program(HELLO_PROGRAM);
     let transaction = client_command(home_path, &["program", "deploy", &program_path]).unwrap();
     let transaction_id = get_transaction_id(&transaction).unwrap();
 
@@ -52,14 +52,23 @@ fn basic_program() {
 #[test]
 fn program_validations() {
     let (_tempfile, home_path, _) = &new_account();
-    let (_program_file, program_path) = load_program(HELLO_PROGRAM);
+    let (_program_file, program_path, program_id) = load_program(HELLO_PROGRAM);
 
     // fail on execute non deployed command
     let error =
         execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32", "1u32"]).unwrap_err();
     assert!(error.contains("Error executing transaction 1: Could not verify transaction"));
 
-    // deploy a program, save txid
+    // not fail on dry-running non-deployed program ()
+    execute_program(
+        home_path,
+        &program_path,
+        HELLO_PROGRAM,
+        &["1u32", "1u32", "--dry-run"],
+    )
+    .unwrap();
+
+    // deploy a program
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
 
     // fail on already deployed compiled locally
@@ -67,6 +76,14 @@ fn program_validations() {
     assert!(error.contains(
         "Error executing transaction 1: Could not verify transaction: Program already exists"
     ));
+
+    // execute the program, retrieving it from the blockchain, using it's id
+    execute_program(home_path, &program_id, "hello", &["1u32", "1u32"]).unwrap();
+
+    // fail on program execution with an invalid id
+    let error =
+        execute_program(home_path, "inexistent_id.aleo", "hello", &["1u32", "1u32"]).unwrap_err();
+    assert!(error.contains("Could not find program"));
 
     // fail on unknown function
     let error =
@@ -82,7 +99,7 @@ fn program_validations() {
 #[ignore = "Literal operands are not yet supported in VMtropy"]
 fn decrypt_records() {
     let (_acc_file, home_path, credentials) = &new_account();
-    let (_program_file, program_path) = load_program(TOKEN_PROGRAM);
+    let (_program_file, program_path, _) = load_program(TOKEN_PROGRAM);
 
     // deploy a program, save txid
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
@@ -109,9 +126,24 @@ fn decrypt_records() {
     assert_eq!(gates.to_string(), "0u64.private");
     assert_eq!(owner.to_string(), format!("{address}.private"));
 
+    // dry run contains decrypted records
+    let output = execute_program(
+        home_path,
+        &program_path,
+        MINT_FUNCTION,
+        &["1u64", CURRENT_ACCOUNT, "--dry-run"],
+    )
+    .unwrap();
+
+    output
+        .pointer("/decrypted_records")
+        .unwrap()
+        .as_array()
+        .unwrap();
+
     let (_acc_file, home_path, _) = &new_account();
 
-    // // should fail to decrypt records (different credentials)
+    // should fail to decrypt records (different credentials)
     let transaction = retry_command(home_path, &["get", transaction_id, "-d"]).unwrap();
 
     let decrypted_records = transaction
@@ -131,7 +163,7 @@ fn token_transaction() {
     let (_tempfile_bob, bob_home, bob_credentials) = &new_account();
 
     // Load token program with Alice credentials
-    let (_program_file, program_path) = load_program("token");
+    let (_program_file, program_path, _) = load_program("token");
 
     // Deploy the token program to the blockchain
     client_command(alice_home, &["program", "deploy", &program_path]).unwrap();
@@ -190,7 +222,7 @@ fn consume_records() {
     let (_acc_file, home_path, _) = &new_account();
 
     // load "records" program
-    let (_program_file, program_path) = load_program("records");
+    let (_program_file, program_path, _) = load_program("records");
 
     // deploy "records" program
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
@@ -257,13 +289,7 @@ fn validate_credits() {
     .unwrap();
     assert!(output.contains("Coinbase functions cannot be called"));
 
-    // test that executing the genesis function fails
-    let output = execute_program(home_path, credits_path, "genesis", &["%account", "100u64"])
-        .err()
-        .unwrap();
-    assert!(output.contains("Coinbase functions cannot be called"));
-
-    let (_program_file, program_path) = load_program("credits");
+    let (_program_file, program_path, _) = load_program("credits");
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
     let output = execute_program(
         home_path,
@@ -299,7 +325,7 @@ fn transfer_credits() {
             "transfer",
             &record,
             credentials.get("address").unwrap(),
-            "10u64",
+            "10",
         ],
     )
     .unwrap();
@@ -316,7 +342,7 @@ fn transaction_fees() {
     let (_tempfile, receiver_home, credentials) = &new_account();
 
     // try to run a deployment with a fee but no credits available, should fail
-    let (_program_file, program_path) = load_program(HELLO_PROGRAM);
+    let (_program_file, program_path, _) = load_program(HELLO_PROGRAM);
     let output = client_command(
         receiver_home,
         &["program", "deploy", &program_path, "--fee", "100"],
@@ -341,7 +367,7 @@ fn transaction_fees() {
             "transfer",
             &record,
             credentials.get("address").unwrap(),
-            "10u64",
+            "10",
         ],
     )
     .unwrap();
@@ -392,8 +418,7 @@ fn transaction_fees() {
 
     // at this point there's a single record in the account, since we want to run a credits program
     // below and also pay a separate fee, we'll have to split it first
-    let transaction =
-        client_command(receiver_home, &["credits", "split", &record, "3u64"]).unwrap();
+    let transaction = client_command(receiver_home, &["credits", "split", &record, "3"]).unwrap();
 
     // request the transaction until it's committed before moving on, to ensure records are available
     let transaction_id = get_transaction_id(&transaction).unwrap();
@@ -457,6 +482,100 @@ fn transaction_fees() {
     assert_balance(receiver_home, 2).unwrap();
 }
 
+#[test]
+#[ignore = "Check with consensus team"]
+fn staking() {
+    // create a test account
+    let (_tempfile, receiver_home, credentials) = &new_account();
+
+    // transfer a known amount of credits to the test account
+    let validator_home = validator_account_path();
+    let tendermint_validator = validator_address(&validator_home);
+    let record = client_command(&validator_home, &["account", "records"])
+        .unwrap()
+        .pointer("/2/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    client_command(
+        &validator_home,
+        &[
+            "credits",
+            "transfer",
+            &record,
+            credentials.get("address").unwrap(),
+            "50",
+        ],
+    )
+    .unwrap();
+
+    assert_balance(receiver_home, 50).unwrap();
+
+    let record = client_command(receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // try to stake more than available, fail
+    let error = client_command(
+        receiver_home,
+        &["credits", "stake", "60", &record, &tendermint_validator],
+    )
+    .unwrap_err();
+    // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
+    // this should be improved to properly handle execution errors internally and showing a clear error message in the CLI
+    assert!(error.contains("Integer subtraction failed"));
+
+    // TODO add check: try to stake for an unexistent validator, fail
+
+    // stake all available
+    let transaction = client_command(
+        receiver_home,
+        &["credits", "stake", "50", &record, &tendermint_validator],
+    )
+    .unwrap();
+
+    let staked_credits_record = transaction
+        .pointer("/Execution/transitions/0/outputs/1/value")
+        .unwrap()
+        .as_str()
+        .unwrap();
+
+    // try to unstake more than available, fail
+    let error = client_command(
+        receiver_home,
+        &[
+            "credits",
+            "unstake",
+            "60",
+            staked_credits_record,
+            &tendermint_validator,
+        ],
+    )
+    .unwrap_err();
+    // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
+    // this should be improved to properly handle execution errors internally and showing a clear error message in the CLI
+    assert!(error.contains("Integer subtraction failed"));
+
+    // unstake all available
+    client_command(
+        receiver_home,
+        &[
+            "credits",
+            "unstake",
+            "50",
+            staked_credits_record,
+            &tendermint_validator,
+        ],
+    )
+    .unwrap();
+}
+
 // HELPERS
 
 /// Retries iteratively to get a transaction until something returns
@@ -508,21 +627,19 @@ fn new_account() -> (NamedTempFile, String, HashMap<String, String>) {
     (tempfile, aleo_path, credentials)
 }
 
-/// Load the source code from the given example file, and return a tempfile along with its path,
-/// with the same source code but a randomized name.
+/// Load the source code from the given example file, randomize it's name, and return a tempfile
+/// with the same source code but with the new name, along with its path and the new id.
 /// The file will be removed when it goes out of scope.
-fn load_program(program_name: &str) -> (NamedTempFile, String) {
+fn load_program(program_name: &str) -> (NamedTempFile, String, String) {
     let program_file = NamedTempFile::new(program_name).unwrap();
     let path = program_file.path().to_string_lossy().to_string();
     // FIXME hardcoded path
     let source = fs::read_to_string(format!("aleo/{program_name}.aleo")).unwrap();
     // randomize the name so it's different on every test
-    let source = source.replace(
-        &format!("{program_name}.aleo"),
-        &format!("{}{}.aleo", program_name, unique_id()),
-    );
+    let program_id = format!("{}{}.aleo", program_name, unique_id());
+    let source = source.replace(&format!("{program_name}.aleo"), &program_id);
     fs::write(&path, source).unwrap();
-    (program_file, path)
+    (program_file, path, program_id)
 }
 
 fn unique_id() -> String {
@@ -621,4 +738,11 @@ fn validator_account_path() -> String {
         .join(".tendermint")
         .to_string_lossy()
         .into()
+}
+
+fn validator_address(tendermint_home: &str) -> String {
+    let key_path = std::path::Path::new(tendermint_home).join("config/priv_validator_key.json");
+    let json = std::fs::read_to_string(key_path).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json).unwrap();
+    json["pub_key"]["value"].as_str().unwrap().to_string()
 }
