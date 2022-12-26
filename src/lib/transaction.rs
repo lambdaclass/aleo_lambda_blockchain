@@ -213,12 +213,7 @@ impl Transaction {
         let function = vm::Identifier::from_str(function)?;
         let (program, _keys) = load_credits();
 
-        vm::execution(
-            program,
-            function,
-            inputs,
-            private_key,
-        )
+        vm::execution(program, function, inputs, private_key)
     }
 }
 

@@ -393,8 +393,9 @@ impl SnarkVMApp {
             verifying_keys,
             ..
         } = transaction
-        {   
-            self.programs.add(&program.id().to_string(), program, verifying_keys)?
+        {
+            self.programs
+                .add(&program.id().to_string(), program, verifying_keys)?
         }
         Ok(())
     }

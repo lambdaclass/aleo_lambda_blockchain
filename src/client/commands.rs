@@ -424,8 +424,13 @@ async fn run_credits_command(
 ) -> Result<serde_json::Value> {
     let fee = choose_fee_record(credentials, url, fee_amount, fee_record, inputs).await?;
     let function_identifier = vm::Identifier::from_str(function)?;
-    let transaction =
-        Transaction::credits_execution(function_identifier, inputs, &credentials.private_key, fee, validator)?;
+    let transaction = Transaction::credits_execution(
+        function_identifier,
+        inputs,
+        &credentials.private_key,
+        fee,
+        validator,
+    )?;
     let transaction_serialized = bincode::serialize(&transaction).unwrap();
     tendermint::broadcast(transaction_serialized, url).await?;
     Ok(json!(transaction))

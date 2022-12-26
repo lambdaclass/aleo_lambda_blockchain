@@ -219,10 +219,7 @@ pub fn execution(
 /// Generate a record for a specific program with the given attributes,
 /// by using the given seed to deterministically generate a nonce.
 /// This could be replaced by a more user-friendly record constructor.
-pub fn mint_record(
-    owner_address: &Address,
-    gates: u64,
-) -> Result<(Field, EncryptedRecord)> {
+pub fn mint_record(owner_address: &Address, gates: u64) -> Result<(Field, EncryptedRecord)> {
     // TODO have someone verify/audit this, probably it's unsafe or breaks cryptographic assumptions
 
     let mut address = [0_u8; 63];
