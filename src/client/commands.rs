@@ -5,7 +5,7 @@ use itertools::Itertools;
 use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
-use lib::vm;
+use lib::vm::{self, compute_serial_number};
 use lib::vm::{EncryptedRecord, ProgramID};
 use log::debug;
 use serde_json::json;
@@ -191,10 +191,16 @@ impl Command {
                     bail!("this shouldn't be reachable, the account new is a special case handled elsewhere")
                 }
                 Command::Account(Account::Balance) => {
-                    let balance = get_records(&credentials, &url)
-                        .await?
-                        .iter()
-                        .fold(0, |acc, (_, _, record)| acc + record.gates);
+                    let balance = get_records(&credentials, &url).await?.iter().fold(
+                        0,
+                        |acc, (_, _, record)| {
+                            #[cfg(feature = "snarkvm_backend")]
+                            let gates = ***record.gates();
+                            #[cfg(feature = "vmtropy_backend")]
+                            let gates = record.gates;
+                            acc + gates
+                        },
+                    );
 
                     json!({ "balance": balance })
                 }
@@ -398,19 +404,21 @@ impl Command {
             .output_records()
             .iter()
             .filter(|(_commitment, record)| {
-                // The above turns a snarkVM address into an address that is
-                // useful for the vm. This should change a little when we support
-                // our own addresses.
-                let address = vm::to_address(credentials.address.to_string());
-                record.is_owner(&address, &credentials.view_key)
+                record.is_owner(&credentials.address, &credentials.view_key)
             })
             .filter_map(|(_commitment, record)| record.decrypt(&credentials.view_key).ok())
             .collect()
     }
 }
 
+#[cfg(feature = "vmtropy_backend")]
 fn u64_to_value(amount: u64) -> vm::UserInputValueType {
     vm::UserInputValueType::U64(amount)
+}
+
+#[cfg(feature = "snarkvm_backend")]
+fn u64_to_value(amount: u64) -> vm::UserInputValueType {
+    vm::UserInputValueType::from_str(&format!("{amount}u64")).expect("couldn't parse amount")
 }
 
 async fn run_credits_command(
@@ -447,20 +455,15 @@ fn parse_input_value(input: &str) -> Result<vm::UserInputValueType> {
     if input == "%account" {
         let credentials = account::Credentials::load()?;
         let address = credentials.address.to_string();
-        return vm::UserInputValueType::try_from(address);
+        return vm::UserInputValueType::from_str(&address);
     }
 
     // try parsing a jsonified plaintext record
     if let Ok(record) = serde_json::from_str::<vm::Record>(input) {
-        return Ok(vm::UserInputValueType::Record(vm::Record {
-            owner: record.owner,
-            gates: record.gates,
-            data: record.data,
-            nonce: record.nonce,
-        }));
+        return Ok(vm::UserInputValueType::Record(record));
     }
     // otherwise fallback to parsing a snarkvm literal
-    vm::UserInputValueType::try_from(input.to_string())
+    vm::UserInputValueType::from_str(&input.to_string())
 }
 
 pub fn parse_input_record(input: &str) -> Result<vm::UserInputValueType> {
@@ -491,11 +494,17 @@ async fn get_records(
         .filter_map(|(commitment, ciphertext)| {
             ciphertext
                 .decrypt(&credentials.view_key)
-                .map(|decrypted_record| (commitment, ciphertext, decrypted_record))
+                .map(|decrypted_record| (commitment.clone(), ciphertext, decrypted_record))
                 .ok()
-                .filter(|(_, _, decrypted_record)| {
-                    let serial_number = decrypted_record.serial_number(&credentials.private_key);
-                    serial_number.is_ok() & spent_records.contains(&serial_number.unwrap())
+                .filter(|(_, ciphertext, _decrypted_record)| {
+                    let serial_number = compute_serial_number(credentials.private_key, commitment);
+                    #[cfg(feature = "snarkvm_backend")]
+                    return serial_number.is_ok()
+                        && !spent_records.contains(&serial_number.unwrap());
+                    #[cfg(feature = "vmtropy_backend")]
+                    return serial_number.is_ok()
+                        && !spent_records.contains(&serial_number.unwrap())
+                        && ciphertext.is_owner(&credentials.address, &credentials.view_key);
                 })
         })
         .collect();
@@ -518,17 +527,8 @@ async fn choose_fee_record(
     }
     let amount = amount.unwrap();
 
-    if let Some(vm::UserInputValueType::Record(vm::Record {
-        owner,
-        gates,
-        data,
-        nonce,
-    })) = record
-    {
-        return Ok(Some((
-            amount,
-            vm::Record::new(*owner, *gates, data.clone(), Some(*nonce)),
-        )));
+    if let Some(vm::UserInputValueType::Record(record_value)) = record {
+        return Ok(Some((amount, record_value.clone())));
     }
 
     let account_records: Vec<vm::Record> = get_records(credentials, url)
@@ -569,14 +569,8 @@ fn select_default_fee_record(
     let input_records: HashSet<String> = inputs
         .iter()
         .filter_map(|value| {
-            if let vm::UserInputValueType::Record(vm::Record {
-                owner,
-                gates,
-                data,
-                nonce,
-            }) = value
-            {
-                Some(vm::Record::new(*owner, *gates, data.clone(), Some(*nonce)).to_string())
+            if let vm::UserInputValueType::Record(record) = value {
+                Some(record.to_string())
             } else {
                 None
             }
@@ -585,15 +579,25 @@ fn select_default_fee_record(
 
     account_records
         .iter()
-        .sorted_by_key(|record|
-                       // negate to get bigger records first
-                       -(record.gates as i64))
+        .sorted_by_key(|record| {
+            #[cfg(feature = "snarkvm_backend")]
+            let gates = ***record.gates();
+            #[cfg(feature = "vmtropy_backend")]
+            let gates = record.gates;
+
+            // negate to get bigger records first
+            -(gates as i64)
+        })
         .find(|record| {
+            #[cfg(feature = "snarkvm_backend")]
+            let gates = ***record.gates();
+            #[cfg(feature = "vmtropy_backend")]
+            let gates = record.gates;
             // note that here we require that the amount of the record be more than the requested fee
             // even though there may be implicit fees in the execution that make the actual amount to be subtracted
             // less that that amount, but since we don't have the execution transitions yet, we can't know at this point
             // so we make this stricter requirement.
-            !input_records.contains(&record.to_string()) && record.gates >= amount
+            !input_records.contains(&record.to_string()) && gates >= amount
         })
         .ok_or_else(|| {
             anyhow!("there are not records with enough credits for a {amount} gates fee")
@@ -637,12 +641,7 @@ mod tests {
         // if one record but also input, fail
         let error = select_default_fee_record(
             5,
-            &[vm::UserInputValueType::Record(vm::Record {
-                owner: record6.owner,
-                gates: record6.gates,
-                data: record6.data.clone(),
-                nonce: record6.nonce,
-            })],
+            &[vm::UserInputValueType::Record(record6.clone())],
             &[record6.clone()],
         )
         .unwrap_err();
@@ -662,12 +661,7 @@ mod tests {
 
         let result = select_default_fee_record(
             5,
-            &[vm::UserInputValueType::Record(vm::Record {
-                owner: record10.owner,
-                gates: record10.gates,
-                data: record10.data.clone(),
-                nonce: record10.nonce,
-            })],
+            &[vm::UserInputValueType::Record(record10.clone())],
             &[record5, record10, record6.clone()],
         )
         .unwrap();
@@ -675,7 +669,7 @@ mod tests {
     }
 
     fn mint_record(address: &vm::Address, view_key: &vm::ViewKey, amount: u64) -> vm::Record {
-        vm::mint_credits(address, amount)
+        vm::mint_record("credits.aleo", "credits", address, amount, 123)
             .unwrap()
             .1
             .decrypt(view_key)

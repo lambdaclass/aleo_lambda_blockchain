@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, bail, ensure, Result};
 use log::debug;
+use sha3::{Digest, Sha3_256};
 pub use vmtropy::build_program;
-pub use vmtropy::helpers::to_address;
 pub use vmtropy::jaleo::{get_credits_key, mint_credits};
 pub use vmtropy::jaleo::{Itertools, UserInputValueType};
 use vmtropy::VariableType;
@@ -55,7 +55,7 @@ pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> 
             )
         }
         // Ensure the function name with the verifying key is correct.
-        if &candidate_name.to_string() != &function.name().to_string() {
+        if &candidate_name != &function.name() {
             bail!(
                 "The verifier key is '{candidate_name}', but the function name is '{}'",
                 function.name()
@@ -87,7 +87,10 @@ pub fn verify_execution(
     // We may revisit if we add validator rewards, at which point some credits may be minted, although
     // still not by external function calls
     ensure!(
-        !program_is_coinbase(&transition.program_id, &transition.function_name),
+        !program_is_coinbase(
+            &transition.program_id.to_string(),
+            &transition.function_name.to_string()
+        ),
         "Coinbase functions cannot be called"
     );
     // // Ensure the transition ID is correct.
@@ -198,8 +201,8 @@ pub fn execution(
     let encoded_proof = hex::encode(bytes_proof);
 
     let transition = Transition {
-        program_id: program.id().to_string(),
-        function_name: function_name.to_string(),
+        program_id: *program.id(),
+        function_name: function_name,
         inputs: inputs.into_values().collect::<Vec<VariableType>>(),
         outputs: outputs.into_values().collect::<Vec<VariableType>>(),
         proof: encoded_proof,
@@ -212,4 +215,35 @@ pub fn execution(
 /// Extract the record gates (the minimal credits unit) as a u64 integer, instead of a snarkvm internal type.
 pub fn gates(record: &Record) -> u64 {
     record.gates
+}
+
+/// This is temporary. We should be using the `serial_number` method in the Record struct, but
+/// we are doing this to conform to the current API.
+pub fn compute_serial_number(_private_key: PrivateKey, commitment: Field) -> Result<Field> {
+    Ok(sha3_hash(&hex::decode(commitment)?))
+}
+
+fn sha3_hash(input: &[u8]) -> String {
+    let mut hasher = Sha3_256::new();
+    hasher.update(input);
+    let bytes = hasher.finalize().to_vec();
+    hex::encode(bytes)
+}
+
+/// Generate a record for a specific program with the given attributes,
+/// by using the given seed to deterministically generate a nonce.
+/// This could be replaced by a more user-friendly record constructor.
+pub fn mint_record(
+    _program_id: &str,
+    _record_name: &str,
+    owner_address: &Address,
+    gates: u64,
+    _seed: u64,
+) -> Result<(Field, EncryptedRecord)> {
+    // For now calling mint_credits is enough; on the snarkVM backend the program_id
+    // and record_name are just used to calculate the commitment, but we don't do things that way
+    // The seed is used for instantiating a randomizer, which is used to generate the nonce
+    // and encrypt the record. Once again, we don't really do things that way for now.
+
+    mint_credits(owner_address, gates)
 }

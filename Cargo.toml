@@ -57,6 +57,7 @@ indexmap = "1.9.2"
 itertools = "0.10.5"
 sha2 = "0.10.6"
 base64 = "0.20.0"
+sha3 = "0.10.6"
 
 [dependencies.vmtropy]
 git = "https://github.com/lambdaclass/VMtropy.git"
@@ -76,5 +77,5 @@ ctor = "0.1.23"
 [features]
 default = ["vmtropy_backend"]
 # default = ["snarkvm_backend"]
-snarkvm_backend = [ "snarkvm" ]
-vmtropy_backend = [ "vmtropy" ]
+snarkvm_backend = ["snarkvm"]
+vmtropy_backend = ["vmtropy"]

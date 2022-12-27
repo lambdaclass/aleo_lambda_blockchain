@@ -161,8 +161,15 @@ impl ValidatorSet {
                     "Assigning {credits} credits to {validator} (voting power {})",
                     self.current_votes.get(address).unwrap_or(&0)
                 );
-                let record = vm::mint_credits(&validator.aleo_address, credits)
-                    .expect("Couldn't mint credit records for reward");
+
+                let record = vm::mint_record(
+                    "credits.aleo",
+                    "credits",
+                    &validator.aleo_address,
+                    credits,
+                    self.current_height,
+                )
+                .expect("Couldn't mint credit records for reward");
                 output_records.push(record);
             }
 
@@ -417,16 +424,14 @@ mod tests {
     ) -> u64 {
         rewards
             .iter()
-            .filter(|(_, record)| {
-                // The above turns a snarkVM address into an address that is
-                // useful for the vm. This should change a little when we support
-                // our own addresses.
-                let address = vm::to_address(owner.1.to_string());
-                record.is_owner(&address, &owner.0)
-            })
+            .filter(|(_, record)| record.is_owner(&owner.1, &owner.0))
             .fold(0, |acc, (_, record)| {
                 let decrypted = record.decrypt(&owner.0).unwrap();
-                acc + decrypted.gates
+                #[cfg(feature = "snarkvm_backend")]
+                let gates = ***decrypted.gates();
+                #[cfg(feature = "vmtropy_backend")]
+                let gates = decrypted.gates;
+                acc + gates
             })
     }
 }

@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use indexmap::IndexMap;
 use lib::vm::{self, VerifyingKeyMap};
 use log::{debug, error};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
@@ -116,26 +115,22 @@ impl ProgramStore {
     }
 
     fn load_credits(&self) -> Result<()> {
-        let (credits_program, _keys) = lib::load_credits();
+        let (credits_program, keys) = lib::load_credits();
 
-        if self.exists(&credits_program.id().to_string()) {
+        if self.exists(&credits_program.id()) {
             debug!("Credits program already exists in program store");
             Ok(())
         } else {
             debug!("Loading credits.aleo as part of Program Store initialization");
-            let mut key_map = IndexMap::new();
 
-            for (function_name, _function) in credits_program.functions() {
-                let (_, verifying_key) = vm::get_credits_key(&credits_program, function_name)?;
-                key_map.insert(function_name.to_string(), verifying_key);
-            }
+            let key_map = keys
+                .map
+                .into_iter()
+                .map(|(i, (_, verifying_key))| (i, verifying_key))
+                .collect();
 
-            #[cfg(feature = "snarkvm_backend")]
-            self.add(&credits_program.id().to_string(), &credits_program, key_map)?;
-
-            #[cfg(feature = "vmtropy_backend")]
             self.add(
-                &credits_program.id().to_string(),
+                &credits_program.id(),
                 &credits_program,
                 &VerifyingKeyMap { map: key_map },
             )?;
@@ -176,14 +171,12 @@ mod tests {
         let program =
             Program::from_str(fs::read_to_string(program_path).unwrap().as_str()).unwrap();
 
-        let get_program = store.get(&program.id().to_string());
+        let get_program = store.get(&program.id());
 
         assert!(get_program.unwrap().is_none());
 
         let storage_attempt = store_program(&store, "/aleo/hello.aleo");
-        assert!(
-            storage_attempt.is_ok() && store.exists(&storage_attempt.unwrap().id().to_string())
-        );
+        assert!(storage_attempt.is_ok() && store.exists(&storage_attempt.unwrap().id()));
 
         // FIXME patching rocksdb weird behavior
         std::mem::forget(store);
@@ -200,7 +193,7 @@ mod tests {
         }
         let store = ProgramStore::new(&db_path("credits")).unwrap();
 
-        assert!(store.exists(&program.id().to_string()));
+        assert!(store.exists(&program.id()));
     }
 
     fn store_program(program_store: &ProgramStore, path: &str) -> Result<vm::Program> {
@@ -217,11 +210,7 @@ mod tests {
             .map(|(i, (_, verifying_key))| (i, verifying_key))
             .collect();
 
-        program_store.add(
-            &program.id().to_string(),
-            &program,
-            &VerifyingKeyMap { map: keys },
-        )?;
+        program_store.add(&program.id(), &program, &VerifyingKeyMap { map: keys })?;
 
         Ok(program)
     }

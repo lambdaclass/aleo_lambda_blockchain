@@ -183,7 +183,7 @@ impl RecordStore {
     pub fn add(&self, commitment: Commitment, record: vm::EncryptedRecord) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
-        let commitment = commitment.into_bytes();
+        let commitment = commitment.to_string().into_bytes();
         let ciphertext = record.to_string().into_bytes();
 
         self.command_sender
@@ -219,7 +219,7 @@ impl RecordStore {
 
     /// Return up to `limit` record ciphertexts
     pub fn scan(&self, from: Option<SerialNumber>, limit: Option<usize>) -> Result<ScanResult> {
-        let from = from.map(|commitment| commitment.into_bytes());
+        let from = from.map(|commitment| commitment.to_string().into_bytes());
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender.send(Command::ScanRecords {
@@ -236,8 +236,16 @@ impl RecordStore {
             .map(|(commitment, record)| {
                 let commitment =
                     Commitment::from_str(&String::from_utf8_lossy(commitment)).unwrap();
-                let record: EncryptedRecord =
-                    serde_json::from_str(&String::from_utf8_lossy(record)).unwrap();
+
+                #[cfg(feature = "snarkvm_backend")]
+                let record = EncryptedRecord::from_str(&String::from_utf8_lossy(record)).unwrap();
+
+                // TODO: We can't recover the EncryptedRecord from a string
+                // because we don't know how long the last block is (i.e. how much padding there is)
+                // Maybe we can append the length to the ciphertext at the beginning?
+                #[cfg(feature = "vmtropy_backend")]
+                let record: EncryptedRecord = EncryptedRecord::try_from(record).unwrap();
+
                 (commitment, record)
             })
             .collect();
@@ -268,7 +276,7 @@ mod tests {
 
     use indexmap::IndexMap;
     use lib::vm::{compute_serial_number, PrivateKey, Record, ViewKey};
-    use vmtropy::helpers::to_address;
+    type PublicRecord = lib::vm::Record;
 
     use super::*;
 
@@ -414,17 +422,42 @@ mod tests {
 
     // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
 
+    #[cfg(feature = "vmtropy_backend")]
     fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
-        let address = to_address(String::from(
-            "aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry",
-        ));
-        let record = EncryptedRecord::new(address, 5, IndexMap::new(), None);
+        let address =
+            String::from("aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry");
+        let record = Record::new_from_aleo_address(address, 5, IndexMap::new(), None);
         let commitment = record.commitment().unwrap();
 
         let private_key = PrivateKey::new(&mut rand::thread_rng()).unwrap();
         let view_key = ViewKey::try_from(&private_key).unwrap();
         let record_ciphertext = record.encrypt(&view_key).unwrap();
-        let serial_number = record.serial_number(&private_key).unwrap();
+        let serial_number = compute_serial_number(private_key, commitment.clone()).unwrap();
+
+        (record_ciphertext, commitment, serial_number)
+    }
+
+    #[cfg(feature = "snarkvm_backend")]
+    fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
+        use lib::vm::{Identifier, ProgramID};
+        use snarkvm::prelude::{Network, Testnet3, Uniform};
+
+        let rng = &mut rand::thread_rng();
+        let randomizer = Uniform::rand(rng);
+        let nonce = Testnet3::g_scalar_multiply(&randomizer);
+        let record = PublicRecord::from_str(
+            &format!("{{ owner: aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {nonce}.public }}"),
+        ).unwrap();
+        let program_id = ProgramID::from_str("foo.aleo").unwrap();
+        let name = Identifier::from_str("bar").unwrap();
+        let commitment = record.to_commitment(&program_id, &name).unwrap();
+        let record_ciphertext = record.encrypt(randomizer).unwrap();
+
+        // compute serial number to check for spending status
+        let pk =
+            PrivateKey::from_str("APrivateKey1zkpCT3zCj49nmVoeBXa21EGLjTUc7AKAcMNKLXzP7kc4cgx")
+                .unwrap();
+        let serial_number = vm::compute_serial_number(pk, commitment).unwrap();
 
         (record_ciphertext, commitment, serial_number)
     }
