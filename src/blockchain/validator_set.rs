@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use lib::vm;
 use log::{debug, error, warn};
 
+use anyhow::{anyhow, ensure, Result};
 use lib::validator::{Address, Validator, VotingPower};
 
 type Fee = u64;
@@ -18,14 +19,24 @@ const PROPOSER_REWARD_PERCENTAGE: u64 = 50;
 /// aleo account addresses needed to assign credits records for validator rewards.
 /// The ValidatorSet exposes methods to collect fees and has logic to distribute them
 /// (in addition to a baseline reward), based on block proposer and voting power.
+/// There are also methods to apply voting power changes on staking transactions.
 #[derive(Debug)]
 pub struct ValidatorSet {
+    /// Path to the file used to persist the currently known validator list of validator, so the app works across restarts.
     path: &'static str,
+    /// The currently known validator set, including the terndermint pub key/address to aleo account mapping
+    /// and their last known voting power.
     validators: HashMap<Address, Validator>,
+    /// The fees collected for the current block.
     fees: Fee,
+    /// The proposer of the current block.
     current_proposer: Option<Address>,
+    /// The previous round block votes, to be considered to distribute this block's rewards.
     current_votes: HashMap<Address, VotingPower>,
+    /// The current block's height, used as a seed to generate reward records deterministically across nodes.
     current_height: u64,
+    /// The list of validators that had voting power changes during the current block, including added or removed ones.
+    updated_validators: HashSet<Address>,
 }
 
 impl ValidatorSet {
@@ -52,26 +63,12 @@ impl ValidatorSet {
             fees: 0,
             current_proposer: None,
             current_votes: HashMap::new(),
+            updated_validators: HashSet::new(),
         }
     }
 
-    /// Replace the entire validator set with the given tendermint pubkey to aleo address mapping.
-    /// The mapping is stored to a validators file to pick up across node restarts.
-    // FIXME redundant name, reconsider
-    pub fn set_validators(&mut self, validators: Vec<Validator>) {
-        std::fs::write(self.path, serde_json::to_string(&validators).unwrap()).unwrap();
-        let addresses = validators
-            .into_iter()
-            .map(|validator| {
-                debug!("loading validator {}", validator);
-                (validator.address(), validator)
-            })
-            .collect();
-        self.validators = addresses;
-    }
-
     /// Updates state based on previous commit votes, to know how awards should be assigned.
-    pub fn prepare(
+    pub fn begin_block(
         &mut self,
         proposer: &Address,
         votes: HashMap<Address, VotingPower>,
@@ -84,24 +81,100 @@ impl ValidatorSet {
             );
         }
 
-        for voter in votes.keys() {
+        for (voter, power) in &votes {
             if !self.validators.contains_key(voter) {
                 error!(
                     "received unknown address as voter {}",
                     hex::encode_upper(voter)
                 );
             }
+
+            if *power < 0 {
+                error!(
+                    "received negative voting power {power} for {}",
+                    hex::encode_upper(voter)
+                )
+            }
         }
 
+        self.updated_validators = HashSet::new();
         self.current_height = height;
         self.current_proposer = Some(proposer.to_vec());
+        // note that we rely on voting power for a given round as informed by tendermint as opposed to
+        // using the one tracked in self.validators. This is because the voting power on the informed round
+        // may not be the same as the last known one (e.g. there could be staking changes already applied
+        // to self.validators that will take some rounds before affecting the consensus voting).
         self.current_votes = votes;
         self.fees = BASELINE_BLOCK_REWARD;
     }
 
+    /// Return whether is valid to apply the given validator update, e.g.
+    /// there's enough voting power to unstake and the tendermint and aleo addresses
+    /// the known mappings. This takes into account pending updates if any, so it's safe
+    /// to use both during lightweight mempool checks (check_tx) and transaction delivery (deliver_tx).
+    pub fn validate(&self, update: &Validator) -> Result<()> {
+        ensure!(
+            update.voting_power != 0,
+            "attempted a validator update with zero voting power change {update}"
+        );
+
+        if let Some(validator) = self.validators.get(&update.address()) {
+            // this is an already known validator
+            ensure!(validator.aleo_address == update.aleo_address,
+                    "attempted to apply a staking update on a different aleo account. expected {} received {}",
+                    validator.aleo_address, update.aleo_address);
+
+            ensure!(
+                validator.voting_power + update.voting_power >= 0,
+                "attempted to unstake more voting power than available for {validator}"
+            );
+        } else {
+            // this is a new validator
+            ensure!(
+                update.voting_power > 0,
+                "attempted to add a new validator {update} with non positive voting power {}",
+                update.voting_power
+            )
+        }
+        Ok(())
+    }
+
+    /// Add or update the given validator and its voting power.
+    /// Assumes this update has been validated previously with is_valid_update.
+    pub fn apply(&mut self, update: Validator) {
+        self.validate(&update)
+            .expect("attempted to apply an invalid update");
+
+        // mark as updated so its included in the pending updates result
+        self.updated_validators.insert(update.address());
+
+        // note that this could leave a validator with zero voting power, which will instruct
+        // tendermint to remove it, but we still need to keep it around since we can receive
+        // votes from that validator on subsequent rounds.
+        self.validators
+            .entry(update.address())
+            .and_modify(|validator| validator.voting_power += update.voting_power)
+            .or_insert(update);
+    }
+
     /// Add the given amount to the current block collected fees.
-    pub fn add(&mut self, fee: u64) {
+    pub fn collect(&mut self, fee: u64) {
         self.fees += fee;
+    }
+
+    /// Return the list of validators that have been updated by transactions in the current block.
+    pub fn pending_updates(&self) -> Vec<Validator> {
+        self.updated_validators
+            .iter()
+            .fold(Vec::new(), |mut acc, address| {
+                acc.push(
+                    self.validators
+                        .get(address)
+                        .expect("missing updated validator")
+                        .clone(),
+                );
+                acc
+            })
     }
 
     /// Distributes the sum of the block fees plus some baseline block credits
@@ -109,15 +182,15 @@ impl ValidatorSet {
     /// weighted by their voting power (which is assumed to be proportional to its stake).
     /// If there are credits left because of rounding errors when dividing by voting power,
     /// they are assigned to the proposer.
-    pub fn rewards(&self) -> Vec<(vm::Field, vm::EncryptedRecord)> {
+    pub fn block_rewards(&self) -> Vec<(vm::Field, vm::EncryptedRecord)> {
         if let Some(proposer) = &self.current_proposer {
             // first calculate which part of the total belongs to voters
             let voter_reward_percentage = 100 - PROPOSER_REWARD_PERCENTAGE;
             let total_voter_reward = (self.fees * voter_reward_percentage) / 100;
-            let total_voting_power = self
-                .current_votes
-                .iter()
-                .fold(0, |accum, (_address, power)| accum + power);
+            let total_voting_power =
+                self.current_votes
+                    .iter()
+                    .fold(0, |accum, (_address, power)| accum + power) as u64;
             debug!(
                 "total block rewards: {}, total voting power: {}, total voter rewards: {}",
                 self.fees, total_voting_power, total_voter_reward
@@ -127,7 +200,7 @@ impl ValidatorSet {
             let mut remaining_fees = self.fees;
             let mut rewards = HashMap::new();
             for (address, voting_power) in &self.current_votes {
-                let credits = (voting_power * total_voter_reward) / total_voting_power;
+                let credits = (*voting_power as u64 * total_voter_reward) / total_voting_power;
                 remaining_fees -= credits;
                 rewards.insert(address, credits);
             }
@@ -178,6 +251,15 @@ impl ValidatorSet {
             Vec::new()
         }
     }
+
+    /// Saves the currently known list of validators to disk.
+    pub fn commit(&mut self) -> Result<()> {
+        let validators_vec: Vec<Validator> = self.validators.values().cloned().collect();
+        let json = serde_json::to_string(&validators_vec).expect("couldn't serialize validators");
+        let path = self.path;
+        std::fs::write(path, json)
+            .map_err(|e| anyhow!("failed to write validators file {path} {e}"))
+    }
 }
 
 #[cfg(test)]
@@ -186,9 +268,9 @@ mod tests {
 
     #[ctor::dtor]
     fn shutdown() {
-        std::fs::remove_file("abci.validators.test.1").unwrap_or_default();
-        std::fs::remove_file("abci.validators.test.2").unwrap_or_default();
-        std::fs::remove_file("abci.validators.test.3").unwrap_or_default();
+        for i in 0..20 {
+            std::fs::remove_file(format!("abci.validators.test.{i}")).unwrap_or_default();
+        }
     }
 
     #[test]
@@ -203,10 +285,10 @@ mod tests {
         let aleo3 = account_keys();
         let aleo4 = account_keys();
 
-        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
-        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
-        let validator3 = Validator::from_str(tmint3, &aleo3.1.to_string()).unwrap();
-        let validator4 = Validator::from_str(tmint4, &aleo4.1.to_string()).unwrap();
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string(), 1).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string(), 1).unwrap();
+        let validator3 = Validator::from_str(tmint3, &aleo3.1.to_string(), 1).unwrap();
+        let validator4 = Validator::from_str(tmint4, &aleo4.1.to_string(), 1).unwrap();
 
         // create validator set, set validators with voting power
         let mut set = ValidatorSet::new("abci.validators.test.1");
@@ -217,7 +299,7 @@ mod tests {
             validator3.clone(),
             validator4.clone(),
         ];
-        set.set_validators(validators);
+        set_validators(&mut set, validators);
 
         // tmint1 is proposer, tmint3 doesn't vote
         let mut votes = HashMap::new();
@@ -225,15 +307,15 @@ mod tests {
         votes.insert(validator2.address(), 15);
         votes.insert(validator3.address(), 25);
         let voting_power = 10 + 15 + 25;
-        set.prepare(&validator1.address(), votes, 1);
+        set.begin_block(&validator1.address(), votes, 1);
 
         // add fees
-        set.add(20);
-        set.add(35);
+        set.collect(20);
+        set.collect(35);
         let fees = 20 + 35;
 
         // get rewards
-        let records = set.rewards();
+        let records = set.block_rewards();
         let rewards1 = decrypt_rewards(&aleo1, &records);
         let rewards2 = decrypt_rewards(&aleo2, &records);
         let rewards3 = decrypt_rewards(&aleo3, &records);
@@ -258,10 +340,10 @@ mod tests {
         // run another block with different votes, rewards start from scratch
         let mut votes = HashMap::new();
         votes.insert(validator4.address(), 10);
-        set.prepare(&validator4.address(), votes, 2);
-        set.add(10);
+        set.begin_block(&validator4.address(), votes, 2);
+        set.collect(10);
 
-        let records = set.rewards();
+        let records = set.block_rewards();
         let rewards1 = decrypt_rewards(&aleo1, &records);
         let rewards2 = decrypt_rewards(&aleo2, &records);
         let rewards3 = decrypt_rewards(&aleo3, &records);
@@ -282,27 +364,27 @@ mod tests {
         let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
         let aleo1 = account_keys();
         let aleo2 = account_keys();
-        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
-        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string(), 1).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string(), 1).unwrap();
 
         // create validator set, set validators with voting power
-        let mut set = ValidatorSet::new("abci.validators.test.1");
+        let mut set = ValidatorSet::new("abci.validators.test.2");
 
         let validators = vec![validator1.clone(), validator2.clone()];
-        set.set_validators(validators);
+        set_validators(&mut set, validators);
 
         // tmint1 is proposer and didn't vote
         let mut votes = HashMap::new();
         votes.insert(validator2.address(), 15);
         let voting_power = 15;
-        set.prepare(&validator1.address(), votes, 1);
+        set.begin_block(&validator1.address(), votes, 1);
 
         // add fees
-        set.add(35);
+        set.collect(35);
         let fees = 35;
 
         // get rewards
-        let records = set.rewards();
+        let records = set.block_rewards();
         let rewards1 = decrypt_rewards(&aleo1, &records);
         let rewards2 = decrypt_rewards(&aleo2, &records);
 
@@ -325,25 +407,25 @@ mod tests {
         let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
         let aleo1 = account_keys();
         let aleo2 = account_keys();
-        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
-        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string(), 1).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string(), 1).unwrap();
         let validators = vec![validator1.clone(), validator2.clone()];
 
-        let mut set1 = ValidatorSet::new("abci.validators.test.2");
-        let mut set2 = ValidatorSet::new("abci.validators.test.3");
-        set1.set_validators(validators.clone());
-        set2.set_validators(validators);
+        let mut set1 = ValidatorSet::new("abci.validators.test.3");
+        let mut set2 = ValidatorSet::new("abci.validators.test.4");
+        set_validators(&mut set1, validators.clone());
+        set_validators(&mut set2, validators);
 
         let mut votes = HashMap::new();
         votes.insert(validator1.address(), 10);
         votes.insert(validator2.address(), 15);
-        set1.prepare(&validator1.address(), votes.clone(), 1);
-        set2.prepare(&validator1.address(), votes.clone(), 1);
-        set1.add(100);
-        set2.add(100);
+        set1.begin_block(&validator1.address(), votes.clone(), 1);
+        set2.begin_block(&validator1.address(), votes.clone(), 1);
+        set1.collect(100);
+        set2.collect(100);
 
-        let mut records11 = set1.rewards();
-        let mut records21 = set2.rewards();
+        let mut records11 = set1.block_rewards();
+        let mut records21 = set2.block_rewards();
         records11.sort_by_key(|k| k.0);
         records21.sort_by_key(|k| k.0);
 
@@ -353,13 +435,13 @@ mod tests {
 
         // prepare another block with the same fees, verify that even though
         // the record amounts are the same, the records themselves are not
-        set1.prepare(&validator1.address(), votes.clone(), 2);
-        set2.prepare(&validator1.address(), votes.clone(), 2);
-        set1.add(100);
-        set2.add(100);
+        set1.begin_block(&validator1.address(), votes.clone(), 2);
+        set2.begin_block(&validator1.address(), votes.clone(), 2);
+        set1.collect(100);
+        set2.collect(100);
 
-        let mut records12 = set1.rewards();
-        let mut records22 = set2.rewards();
+        let mut records12 = set1.block_rewards();
+        let mut records22 = set2.block_rewards();
         records12.sort_by_key(|k| k.0);
         records22.sort_by_key(|k| k.0);
 
@@ -381,24 +463,24 @@ mod tests {
         let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
         let aleo1 = account_keys();
         let aleo2 = account_keys();
-        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
-        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string(), 1).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string(), 1).unwrap();
 
         // create validator set, set validators with voting power
-        let mut set = ValidatorSet::new("abci.validators.test.1");
+        let mut set = ValidatorSet::new("abci.validators.test.5");
 
         let validators = vec![validator1.clone(), validator2];
-        set.set_validators(validators);
+        set_validators(&mut set, validators);
 
         // in genesis there won't be any previous block votes
         let votes = HashMap::new();
-        set.prepare(&validator1.address(), votes, 1);
+        set.begin_block(&validator1.address(), votes, 1);
 
-        set.add(20);
-        set.add(35);
+        set.collect(20);
+        set.collect(35);
         let fees = 20 + 35;
 
-        let records = set.rewards();
+        let records = set.block_rewards();
         let rewards1 = decrypt_rewards(&aleo1, &records);
         let rewards2 = decrypt_rewards(&aleo2, &records);
         let total_rewards = BASELINE_BLOCK_REWARD + fees;
@@ -406,6 +488,167 @@ mod tests {
         // proposer takes all
         assert_eq!(total_rewards, rewards1);
         assert_eq!(0, rewards2);
+    }
+
+    #[test]
+    fn add_update_validators() {
+        // create set and setup initial 2 validators
+        let tmint1 = "vM+mkdPMvplfxO7wM57z4FXy0TlBC2Onb+MaqcXE8ig=";
+        let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
+        let tmint3 = "TtJ9B7yGXANFIJqH2LJO8JN6M2WOn2w7sRN0HHi14UE=";
+        let aleo1 = account_keys();
+        let aleo2 = account_keys();
+        let aleo3 = account_keys();
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string(), 1).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string(), 1).unwrap();
+
+        // create validator set, set validators with voting power
+        let mut set = ValidatorSet::new("abci.validators.test.6");
+
+        let validators = vec![validator1.clone(), validator2];
+        set_validators(&mut set, validators);
+
+        // votes/begin block/commit
+        let mut votes = HashMap::new();
+        votes.insert(validator1.address(), 15);
+        set.begin_block(&validator1.address(), votes, 1);
+        // no updates on this round (should ignore default ones from before begin block)
+        assert_eq!(0, set.pending_updates().len());
+        let _records = set.block_rewards();
+        set.commit().unwrap();
+
+        // votes/begin block
+        let mut votes = HashMap::new();
+        votes.insert(validator1.address(), 15);
+        set.begin_block(&validator1.address(), votes, 1);
+
+        // add a new validator, update voting power of a previous one
+        let validator3 = Validator::from_str(tmint3, &aleo3.1.to_string(), 1).unwrap();
+        let validator2_updated = Validator::from_str(tmint2, &aleo2.1.to_string(), 5).unwrap();
+        let validators = vec![validator3.clone(), validator2_updated.clone()];
+        set_validators(&mut set, validators);
+
+        // pending updates includes the two given
+        let mut updates = set.pending_updates();
+        updates.sort_by_key(|v| v.voting_power);
+        assert_eq!(2, updates.len());
+        assert_eq!(validator3.address(), updates[0].address());
+        assert_eq!(1, updates[0].voting_power);
+        assert_eq!(validator2_updated.address(), updates[1].address());
+        assert_eq!(6, updates[1].voting_power);
+
+        let _records = set.block_rewards();
+        set.commit().unwrap();
+    }
+
+    #[test]
+    fn remove_validators() {
+        // create set and setup initial 2 validators
+        let tmint1 = "vM+mkdPMvplfxO7wM57z4FXy0TlBC2Onb+MaqcXE8ig=";
+        let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
+        let aleo1 = account_keys();
+        let aleo2 = account_keys();
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string(), 5).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string(), 5).unwrap();
+
+        let mut set = ValidatorSet::new("abci.validators.test.7");
+        let validators = vec![validator1, validator2.clone()];
+        set_validators(&mut set, validators);
+
+        // votes/begin block
+        let mut votes = HashMap::new();
+        votes.insert(validator2.address(), 5);
+        set.begin_block(&validator2.address(), votes, 1);
+
+        // remove stake but not enough to remove validator
+        let validator2_updated = Validator::from_str(tmint2, &aleo2.1.to_string(), -3).unwrap();
+        set_validators(&mut set, vec![validator2_updated.clone()]);
+
+        // pending updates includes the updated
+        let updates = set.pending_updates();
+        assert_eq!(1, updates.len());
+        assert_eq!(validator2_updated.address(), updates[0].address());
+        assert_eq!(2, updates[0].voting_power);
+
+        let _records = set.block_rewards();
+        set.commit().unwrap();
+
+        // votes/begin block
+        let mut votes = HashMap::new();
+        votes.insert(validator2.address(), 5);
+        set.begin_block(&validator2.address(), votes, 1);
+
+        // remove remaining stake
+        let validator2_updated = Validator::from_str(tmint2, &aleo2.1.to_string(), -2).unwrap();
+        set_validators(&mut set, vec![validator2_updated.clone()]);
+
+        // pending updates includes the removed
+        let updates = set.pending_updates();
+        assert_eq!(1, updates.len());
+        assert_eq!(validator2_updated.address(), updates[0].address());
+        assert_eq!(0, updates[0].voting_power);
+
+        // get rewards check as expected, include removed
+        let _records = set.block_rewards();
+        set.commit().unwrap();
+
+        // votes/begin block, shouldn't fail even if it includes votes from removed one
+        let mut votes = HashMap::new();
+        votes.insert(validator2.address(), 5);
+        set.begin_block(&validator2.address(), votes, 1);
+        assert_eq!(0, set.pending_updates().len());
+        let _records = set.block_rewards();
+        set.commit().unwrap();
+    }
+
+    #[test]
+    fn validators_update_validations() {
+        let tmint1 = "vM+mkdPMvplfxO7wM57z4FXy0TlBC2Onb+MaqcXE8ig=";
+        let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
+        let aleo1 = account_keys();
+        let aleo2 = account_keys();
+        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string(), 5).unwrap();
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string(), 5).unwrap();
+
+        let mut set = ValidatorSet::new("abci.validators.test.8");
+        let validators = vec![validator1, validator2];
+        set_validators(&mut set, validators);
+
+        // invalid when aleo address doesn't match previously known one
+        let aleo2_fake = account_keys();
+        let validator2_fake = Validator::from_str(tmint2, &aleo2_fake.1.to_string(), 5).unwrap();
+        let error = set.validate(&validator2_fake).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("attempted to apply a staking update on a different aleo account"));
+
+        // invalid on new one and negative voting
+        let tmint3 = "TtJ9B7yGXANFIJqH2LJO8JN6M2WOn2w7sRN0HHi14UE=";
+        let aleo3 = account_keys();
+        let validator3 = Validator::from_str(tmint3, &aleo3.1.to_string(), -5).unwrap();
+        let error = set.validate(&validator3).unwrap_err();
+        assert!(error.to_string().contains("non positive voting power"));
+
+        // invalid on zero power new
+        let validator3 = Validator::from_str(tmint3, &aleo3.1.to_string(), 0).unwrap();
+        let error = set.validate(&validator3).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("attempted a validator update with zero voting power change"));
+
+        // invalid on zero power old
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string(), 0).unwrap();
+        let error = set.validate(&validator2).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("attempted a validator update with zero voting power change"));
+
+        // invalid on negative voting more than available
+        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string(), -6).unwrap();
+        let error = set.validate(&validator2).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("attempted to unstake more voting power than available"));
     }
 
     pub fn account_keys() -> (vm::ViewKey, vm::Address) {
@@ -426,5 +669,9 @@ mod tests {
                 let decrypted = record.decrypt(&owner.0).unwrap();
                 acc + vm::gates(&decrypted)
             })
+    }
+
+    fn set_validators(set: &mut ValidatorSet, validators: Vec<Validator>) {
+        validators.into_iter().for_each(|v| set.apply(v));
     }
 }

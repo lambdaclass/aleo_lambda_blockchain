@@ -1,5 +1,6 @@
 use crate::load_credits;
-use crate::vm::{self};
+use crate::validator;
+use crate::vm;
 use anyhow::{anyhow, ensure, Result};
 use log::debug;
 use rand;
@@ -169,6 +170,42 @@ impl Transaction {
                 .iter()
                 .fold(0, |acc, transition| acc + transition.fee()),
         }
+    }
+
+    /// Extract a list of validator updates that result from the current execution.
+    /// This will return a non-empty vector in case some of the transitions are of the
+    /// stake or unstake functions in the credits program.
+    pub fn validator_updates(&self) -> Result<Vec<validator::Validator>> {
+        let mut result = Vec::new();
+        if let Self::Execution {
+            transitions,
+            validator: Some(validator),
+            ..
+        } = self
+        {
+            for transition in transitions {
+                if transition.program_id().to_string() == "credits" {
+                    let extract_output = |index: usize| {
+                        transition
+                            .outputs()
+                            .get(index)
+                            .ok_or_else(|| anyhow!("couldn't find staking output in transition"))
+                    };
+
+                    let amount = match transition.function_name().to_string().as_str() {
+                        "stake" => vm::u64_from_output(extract_output(2)?)? as i64,
+                        "unstake" => -(vm::u64_from_output(extract_output(2)?)? as i64),
+                        _ => continue,
+                    };
+
+                    let aleo_address = vm::address_from_output(extract_output(3)?)?.to_string();
+                    let validator =
+                        validator::Validator::from_str(validator, &aleo_address, amount)?;
+                    result.push(validator);
+                }
+            }
+        }
+        Ok(result)
     }
 
     /// If there is some required fee, return the transition resulting of executing

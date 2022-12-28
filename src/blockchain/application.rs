@@ -45,11 +45,11 @@ impl Application for SnarkVMApp {
                 .expect("failure adding genesis records");
         }
 
-        self.validators
-            .lock()
-            .unwrap()
-            .set_validators(state.validators);
-
+        let mut validator_set = self.validators.lock().unwrap();
+        state
+            .validators
+            .into_iter()
+            .for_each(|update| validator_set.apply(update));
         Default::default()
     }
 
@@ -173,7 +173,7 @@ impl Application for SnarkVMApp {
                 }
 
                 if let Some(validator) = vote_info.validator.clone() {
-                    Some((validator.address, validator.power as u64))
+                    Some((validator.address, validator.power))
                 } else {
                     // If there's no associated validator data, we can't use this vote
                     None
@@ -181,7 +181,7 @@ impl Application for SnarkVMApp {
             })
             .collect();
 
-        self.validators.lock().unwrap().prepare(
+        self.validators.lock().unwrap().begin_block(
             &header.proposer_address,
             votes,
             header.height as u64,
@@ -207,7 +207,7 @@ impl Application for SnarkVMApp {
             .check_no_duplicate_records(&tx)
             .and_then(|_| self.check_inputs_are_unspent(&tx))
             .and_then(|_| self.validate_transaction(&tx))
-            .map(|_| self.validators.lock().unwrap().add(tx.fees() as u64))
+            .map(|_| self.update_validators(&tx))
             .and_then(|_| self.spend_input_records(&tx))
             .and_then(|_| self.add_output_records(&tx))
             .and_then(|_| self.store_program(&tx));
@@ -238,6 +238,26 @@ impl Application for SnarkVMApp {
         }
     }
 
+    /// Applies validator set updates based on staking transactions included in the block.
+    /// For details about validator set update semantics see:
+    /// https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/apps.md#endblock
+    fn end_block(&self, _request: abci::RequestEndBlock) -> abci::ResponseEndBlock {
+        let validator_set = self.validators.lock().unwrap();
+        let validator_updates = validator_set
+            .pending_updates()
+            .iter()
+            .map(|validator| abci::ValidatorUpdate {
+                pub_key: Some(validator.pub_key.into()),
+                power: validator.voting_power(),
+            })
+            .collect();
+
+        abci::ResponseEndBlock {
+            validator_updates,
+            ..Default::default()
+        }
+    }
+
     /// This hook commits is called when the block is comitted (after deliver_tx has been called for each transaction).
     /// Changes to application should take effect here. Tendermint guarantees that no transaction is processed while this
     /// hook is running.
@@ -263,11 +283,15 @@ impl Application for SnarkVMApp {
 
         let height = HeightFile::increment();
 
-        for (commitment, record) in self.validators.lock().unwrap().rewards() {
+        let mut validators = self.validators.lock().unwrap();
+        for (commitment, record) in validators.block_rewards() {
             if let Err(err) = self.records.add(commitment, record) {
                 error!("Failed to add reward record to store {}", err);
             }
         }
+        validators
+            .commit()
+            .unwrap_or_else(|e| error!("failed to save validators: {e}"));
 
         info!("Committing height {}", height);
         abci::ResponseCommit {
@@ -338,6 +362,18 @@ impl SnarkVMApp {
             .unwrap_or(Ok(()))
     }
 
+    /// Apply validator set side-effects of the transaction: collecting fees and changing
+    /// the voting power based on staking transactions.
+    fn update_validators(&self, transaction: &Transaction) -> Result<()> {
+        let mut validator_set = self.validators.lock().unwrap();
+        validator_set.collect(transaction.fees() as u64);
+        transaction
+            .validator_updates()?
+            .into_iter()
+            .for_each(|update| validator_set.apply(update));
+        Ok(())
+    }
+
     fn validate_transaction(&self, transaction: &Transaction) -> Result<()> {
         let result = match transaction {
             Transaction::Deployment {
@@ -363,6 +399,11 @@ impl SnarkVMApp {
                     !transitions.is_empty(),
                     "There are no transitions in the execution"
                 );
+
+                let validator_set = self.validators.lock().unwrap();
+                for update in transaction.validator_updates()? {
+                    validator_set.validate(&update)?
+                }
 
                 for transition in transitions {
                     self.verify_transition(transition)?;

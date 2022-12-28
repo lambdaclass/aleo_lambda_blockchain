@@ -304,3 +304,21 @@ pub fn compute_serial_number(private_key: PrivateKey, commitment: Field) -> Resu
         &sn_nonce,
     )
 }
+
+// Note this is a very hacky ad hoc helper for a specific purpose. Adding it like this
+// because it's general purpose equivalent would be a lot of code which we won't plan to use
+// short term. If you find adding more cases here consider implementing it properly
+pub fn u64_from_output(output: &Output) -> Result<u64> {
+    if let Output::Public(_, Some(Plaintext::Literal(Literal::U64(value), _))) = output {
+        return Ok(*value.deref());
+    };
+    bail!("output type extraction not supported");
+}
+
+// same as above
+pub fn address_from_output(output: &Output) -> Result<Address> {
+    if let Output::Public(_, Some(Plaintext::Literal(Literal::Address(value), _))) = output {
+        return Ok(*value);
+    };
+    bail!("output type extraction not supported");
+}

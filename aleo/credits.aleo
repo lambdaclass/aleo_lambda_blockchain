@@ -57,6 +57,7 @@ function stake:
     output r3 as credits.record;
     output r4 as staked_credits.record;
     output r5 as u64.public;
+    output r3.owner as address.public;
 
 function unstake:
     input r0 as staked_credits.record;
@@ -68,6 +69,7 @@ function unstake:
     output r3 as staked_credits.record;
     output r4 as credits.record;
     output r5 as u64.public;
+    output r3.owner as address.public;
 
 
     

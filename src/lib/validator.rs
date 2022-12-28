@@ -1,18 +1,21 @@
 use std::str::FromStr;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::vm;
 
-pub type VotingPower = u64;
+pub type VotingPower = i64;
 pub type Address = Vec<u8>;
 
+// FIXME this is being used to represent both a validator with its current voting power
+// and a voting power update to be applied to one such validator.
+// separate those in different entities to make the distinction more obvious
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Validator {
     pub aleo_address: vm::Address,
-    pub_key: tendermint::PublicKey,
-    voting_power: VotingPower,
+    pub pub_key: tendermint::PublicKey,
+    pub voting_power: VotingPower,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -22,20 +25,24 @@ pub struct GenesisState {
 }
 
 impl Validator {
-    /// Construct a new validator from a base64 encoded ed25519 public key string (as it appears in tendermint JSON files)
+    /// Construct a new validator update from a base64 encoded ed25519 public key string (as it appears in tendermint JSON files)
     /// And an Aleo address string.
-    pub fn from_str(pub_key: &str, aleo_address: &str) -> Result<Self> {
+    pub fn from_str(pub_key: &str, aleo_address: &str, voting_power: VotingPower) -> Result<Self> {
         let aleo_address = vm::Address::from_str(aleo_address)?;
         let pub_key = tendermint::PublicKey::from_raw_ed25519(&base64::decode(pub_key)?)
             .ok_or_else(|| anyhow!("failed to generate tendermint public key"))?;
-        Ok(Self::new(pub_key, aleo_address))
+        Ok(Self::new(pub_key, aleo_address, voting_power))
     }
 
-    fn new(pub_key: tendermint::PublicKey, aleo_address: vm::Address) -> Self {
+    fn new(
+        pub_key: tendermint::PublicKey,
+        aleo_address: vm::Address,
+        voting_power: VotingPower,
+    ) -> Self {
         Self {
             pub_key,
             aleo_address,
-            voting_power: 0,
+            voting_power,
         }
     }
 
@@ -48,17 +55,6 @@ impl Validator {
 
     pub fn voting_power(&self) -> VotingPower {
         self.voting_power
-    }
-
-    /// Add the given amount, which can be negative, to the validator's current voting power.
-    /// Return an error if more than available is attempted to be subtracted.
-    pub fn add_voting_power(&mut self, diff: i64) -> Result<VotingPower> {
-        let new_power = self.voting_power as i64 + diff;
-        if new_power < 0 {
-            bail!("can't set a negative voting power")
-        }
-        self.voting_power = new_power as u64;
-        Ok(self.voting_power)
     }
 }
 
