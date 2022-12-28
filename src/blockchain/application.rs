@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::program_store::ProgramStore;
@@ -45,11 +46,7 @@ impl Application for SnarkVMApp {
                 .expect("failure adding genesis records");
         }
 
-        let mut validator_set = self.validators.lock().unwrap();
-        state
-            .validators
-            .into_iter()
-            .for_each(|update| validator_set.apply(update));
+        self.validators.lock().unwrap().replace(state.validators);
         Default::default()
     }
 
@@ -173,7 +170,12 @@ impl Application for SnarkVMApp {
                 }
 
                 if let Some(validator) = vote_info.validator.clone() {
-                    Some((validator.address, validator.power))
+                    if validator.power < 0 {
+                        error!("received negative validator vote");
+                        None
+                    } else {
+                        Some((validator.address, validator.power as u64))
+                    }
                 } else {
                     // If there's no associated validator data, we can't use this vote
                     None
@@ -248,7 +250,7 @@ impl Application for SnarkVMApp {
             .iter()
             .map(|validator| abci::ValidatorUpdate {
                 pub_key: Some(validator.pub_key.into()),
-                power: validator.voting_power(),
+                power: validator.voting_power as i64,
             })
             .collect();
 
@@ -304,11 +306,12 @@ impl Application for SnarkVMApp {
 impl SnarkVMApp {
     /// Constructor.
     pub fn new() -> Self {
+        let validators_path = Path::new("abci.validators");
         Self {
             // we rather crash than start with badly initialized stores
             programs: ProgramStore::new("programs").expect("could not create a program store"),
             records: RecordStore::new("records").expect("could not create a record store"),
-            validators: Arc::new(Mutex::new(ValidatorSet::new("abci.validators"))),
+            validators: Arc::new(Mutex::new(ValidatorSet::load_or_create(validators_path))),
         }
     }
 
@@ -368,7 +371,7 @@ impl SnarkVMApp {
         let mut validator_set = self.validators.lock().unwrap();
         validator_set.collect(transaction.fees() as u64);
         transaction
-            .validator_updates()?
+            .stake_updates()?
             .into_iter()
             .for_each(|update| validator_set.apply(update));
         Ok(())
@@ -401,7 +404,7 @@ impl SnarkVMApp {
                 );
 
                 let validator_set = self.validators.lock().unwrap();
-                for update in transaction.validator_updates()? {
+                for update in transaction.stake_updates()? {
                     validator_set.validate(&update)?
                 }
 

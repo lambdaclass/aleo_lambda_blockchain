@@ -65,7 +65,7 @@ fn main() -> Result<()> {
         let tmint_pubkey = tmint_account["pub_key"]["value"]
             .as_str()
             .expect("couldn't extract pubkey from json");
-        let voting_power = *voting_powers.get(tmint_pubkey).unwrap() as i64;
+        let voting_power = *voting_powers.get(tmint_pubkey).unwrap();
         let validator = validator::Validator::from_str(tmint_pubkey, aleo_address, voting_power)?;
 
         println!("Generating record for {aleo_address}");

@@ -175,7 +175,7 @@ impl Transaction {
     /// Extract a list of validator updates that result from the current execution.
     /// This will return a non-empty vector in case some of the transitions are of the
     /// stake or unstake functions in the credits program.
-    pub fn validator_updates(&self) -> Result<Vec<validator::Validator>> {
+    pub fn stake_updates(&self) -> Result<Vec<validator::Stake>> {
         let mut result = Vec::new();
         if let Self::Execution {
             transitions,
@@ -198,9 +198,8 @@ impl Transaction {
                         _ => continue,
                     };
 
-                    let aleo_address = vm::address_from_output(extract_output(3)?)?.to_string();
-                    let validator =
-                        validator::Validator::from_str(validator, &aleo_address, amount)?;
+                    let aleo_address = vm::address_from_output(extract_output(3)?)?;
+                    let validator = validator::Stake::new(validator, aleo_address, amount)?;
                     result.push(validator);
                 }
             }
