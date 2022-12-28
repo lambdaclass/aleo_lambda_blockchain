@@ -543,13 +543,7 @@ fn staking() {
     // try to unstake more than available, fail
     let error = client_command(
         receiver_home,
-        &[
-            "credits",
-            "unstake",
-            "60",
-            staked_credits_record,
-            &tendermint_validator,
-        ],
+        &["credits", "unstake", "60", staked_credits_record],
     )
     .unwrap_err();
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
@@ -559,13 +553,7 @@ fn staking() {
     // unstake all available
     client_command(
         receiver_home,
-        &[
-            "credits",
-            "unstake",
-            "50",
-            staked_credits_record,
-            &tendermint_validator,
-        ],
+        &["credits", "unstake", "50", staked_credits_record],
     )
     .unwrap();
 }

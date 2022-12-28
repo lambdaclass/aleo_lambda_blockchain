@@ -305,12 +305,20 @@ pub fn compute_serial_number(private_key: PrivateKey, commitment: Field) -> Resu
     )
 }
 
-// Note this is a very hacky ad hoc helper for a specific purpose. Adding it like this
-// because it's general purpose equivalent would be a lot of code which we won't plan to use
-// short term. If you find adding more cases here consider implementing it properly
-pub fn u64_from_output(output: &Output) -> Result<u64> {
-    if let Output::Public(_, Some(Plaintext::Literal(Literal::U64(value), _))) = output {
-        return Ok(*value.deref());
+// This function might be too hacky, consider generalizing better and moving it to a proper place
+/// Matches types of literals (that we know are numbers) and turns them into u128 before trying to downcast to the desired type
+pub fn int_from_output<T: std::convert::TryFrom<u128>>(output: &Output) -> Result<T>
+where
+    <T as TryFrom<u128>>::Error: std::fmt::Debug,
+{
+    if let Output::Public(_, Some(Plaintext::Literal(literal, _))) = output {
+        let value = match literal {
+            Literal::U32(v) => *v.deref() as u128,
+            Literal::U64(v) => *v.deref() as u128,
+            Literal::U128(v) => *v.deref(),
+            _ => todo!(),
+        };
+        return Ok(T::try_from(value).expect("issue casting literal to desired type"));
     };
     bail!("output type extraction not supported");
 }
@@ -321,4 +329,12 @@ pub fn address_from_output(output: &Output) -> Result<Address> {
         return Ok(*value);
     };
     bail!("output type extraction not supported");
+}
+
+pub fn u64_to_value(amount: u64) -> Value {
+    Value::from_str(&format!("{amount}u64")).expect("couldn't parse amount")
+}
+
+pub fn u128_to_value(amount: u128) -> Value {
+    Value::from_str(&format!("{amount}u128")).expect("couldn't parse amount")
 }

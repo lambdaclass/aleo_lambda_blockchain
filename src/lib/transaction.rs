@@ -20,18 +20,6 @@ pub enum Transaction {
     Execution {
         id: String,
         transitions: Vec<vm::Transition>,
-
-        /// The pub key of the tendermint validator that staked credits go to,
-        /// in case this is a staking/unstaking execution.
-        // NOTE: for most purposes the stake/unstake transactions are just another type of/ execution.
-        // we could handle most of the special properties as methods in Transaction, but since the vm
-        // doesn't have support for a type where we could fit the validator address, we need to treat it
-        // as a special case and pass it separately (which also prevents us to include that address in the
-        // execution proof).
-        // also NOTE: having the address out of the record and as a separate field means that we can't ensure
-        // the voting power gets removed from the same tendermint validator that did the staking in the first place.
-        // we may work around that but ideally having the tendermint address in the record would be preferable
-        validator: Option<String>,
     },
 }
 
@@ -91,11 +79,7 @@ impl Transaction {
 
         let id = uuid::Uuid::new_v4().to_string();
 
-        Ok(Self::Execution {
-            id,
-            transitions,
-            validator: None,
-        })
+        Ok(Self::Execution { id, transitions })
     }
 
     pub fn credits_execution(
@@ -103,7 +87,6 @@ impl Transaction {
         inputs: &[vm::Value],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
-        validator: Option<String>,
     ) -> Result<Self> {
         let mut transitions = Self::execute_credits(function_name, inputs, private_key)?;
 
@@ -115,11 +98,7 @@ impl Transaction {
         }
 
         let id = uuid::Uuid::new_v4().to_string();
-        Ok(Self::Execution {
-            id,
-            transitions,
-            validator,
-        })
+        Ok(Self::Execution { id, transitions })
     }
 
     pub fn id(&self) -> &str {
@@ -177,12 +156,7 @@ impl Transaction {
     /// stake or unstake functions in the credits program.
     pub fn stake_updates(&self) -> Result<Vec<validator::Stake>> {
         let mut result = Vec::new();
-        if let Self::Execution {
-            transitions,
-            validator: Some(validator),
-            ..
-        } = self
-        {
+        if let Self::Execution { transitions, .. } = self {
             for transition in transitions {
                 if transition.program_id().to_string() == "credits" {
                     let extract_output = |index: usize| {
@@ -193,13 +167,22 @@ impl Transaction {
                     };
 
                     let amount = match transition.function_name().to_string().as_str() {
-                        "stake" => vm::u64_from_output(extract_output(2)?)? as i64,
-                        "unstake" => -(vm::u64_from_output(extract_output(2)?)? as i64),
+                        "stake" => vm::int_from_output::<u64>(extract_output(2)?)? as i64,
+                        "unstake" => -(vm::int_from_output::<u64>(extract_output(2)?)? as i64),
                         _ => continue,
                     };
 
+                    let validator_lower: u128 = vm::int_from_output(extract_output(4)?)?;
+                    let validator_higher: u128 = vm::int_from_output(extract_output(5)?)?;
+
+                    let validator = Transaction::validator_address_from_numbers(
+                        validator_higher,
+                        validator_lower,
+                    )?;
+
                     let aleo_address = vm::address_from_output(extract_output(3)?)?;
-                    let validator = validator::Stake::new(validator, aleo_address, amount)?;
+                    let validator = validator::Stake::new(&validator, aleo_address, amount)?;
+
                     result.push(validator);
                 }
             }
@@ -261,6 +244,28 @@ impl Transaction {
             proving_key.clone(),
         )
     }
+
+    // TODO: Move this to validator set/use tendermint-rs structs for pub keys?
+    pub fn validator_address_as_numbers(bytes: &[u8]) -> Result<(u128, u128)> {
+        ensure!(
+            bytes.len() == 32,
+            "Input validator address is not 32 bytes long"
+        );
+        let high_part: [u8; 16] = bytes[0..16].try_into()?;
+        let low_part: [u8; 16] = bytes[16..].try_into()?;
+
+        Ok((
+            u128::from_be_bytes(high_part),
+            u128::from_be_bytes(low_part),
+        ))
+    }
+
+    pub fn validator_address_from_numbers(higher: u128, lower: u128) -> Result<String> {
+        let mut address = higher.to_be_bytes().to_vec();
+
+        address.append(&mut lower.to_be_bytes().to_vec());
+        Ok(base64::encode(address))
+    }
 }
 
 impl std::fmt::Display for Transaction {
@@ -269,22 +274,27 @@ impl std::fmt::Display for Transaction {
             Transaction::Deployment { id, program, .. } => {
                 write!(f, "Deployment({},{})", id, program.id())
             }
-            Transaction::Execution {
-                id,
-                transitions,
-                validator: None,
-            } => {
+            Transaction::Execution { id, transitions } => {
                 let transition = transitions.first().unwrap();
                 let program_id = transition.program_id();
                 write!(f, "Execution({program_id},{id})")
             }
-            Transaction::Execution {
-                id,
-                validator: Some(validator),
-                ..
-            } => {
-                write!(f, "StakingExecution({id},{validator})")
-            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::transaction::Transaction;
+
+    #[test]
+    fn convert_validator_address() {
+        let pub_key = "KvYujhwQVoCOH1B3FrmtjSN5GgKUjarOKDNIbWfA8hc=";
+        let key_encoded = base64::decode(pub_key).unwrap();
+        let (h, l) = Transaction::validator_address_as_numbers(&key_encoded).unwrap();
+        assert!(h == 57105825100092210844007095251039268237u128);
+        assert!(l == 47151775319435836265997973510082851351u128);
+
+        assert!(Transaction::validator_address_from_numbers(h, l).unwrap() == pub_key);
     }
 }
