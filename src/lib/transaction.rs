@@ -5,6 +5,7 @@ use anyhow::{anyhow, ensure, Result};
 use log::debug;
 use rand;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
@@ -40,14 +41,15 @@ impl Transaction {
             .map(|(i, keys)| (i, keys.1))
             .collect();
 
-        let id = uuid::Uuid::new_v4().to_string();
         let fee = Self::execute_fee(private_key, fee, 0)?;
-        Ok(Transaction::Deployment {
-            id,
+
+        Transaction::Deployment {
+            id: "not known yet".to_string(),
             fee,
             program: Box::new(program),
             verifying_keys,
-        })
+        }
+        .set_hashed_id()
     }
 
     // Used to generate an execution of a program in path or an execution of the credits program
@@ -77,9 +79,11 @@ impl Transaction {
             transitions.push(transition);
         }
 
-        let id = uuid::Uuid::new_v4().to_string();
-
-        Ok(Self::Execution { id, transitions })
+        Self::Execution {
+            id: "not known yet".to_string(),
+            transitions,
+        }
+        .set_hashed_id()
     }
 
     pub fn credits_execution(
@@ -97,8 +101,11 @@ impl Transaction {
             transitions.push(transition);
         }
 
-        let id = uuid::Uuid::new_v4().to_string();
-        Ok(Self::Execution { id, transitions })
+        Self::Execution {
+            id: "not known yet".to_string(),
+            transitions,
+        }
+        .set_hashed_id()
     }
 
     pub fn id(&self) -> &str {
@@ -243,6 +250,68 @@ impl Transaction {
             rng,
             proving_key.clone(),
         )
+    }
+
+    /// Verify that the transaction id is consistent with its contents, by checking it's sha256 hash.
+    pub fn verify(&self) -> Result<()> {
+        ensure!(
+            self.id() == self.hash()?,
+            "Corrupted transaction: Inconsistent transaction id"
+        );
+
+        Ok(())
+    }
+
+    /// Hash the contents of the given enum and return it with the hash as its id.
+    fn set_hashed_id(mut self) -> Result<Self> {
+        let new_id = self.hash()?;
+        match self {
+            Transaction::Deployment { ref mut id, .. } => *id = new_id,
+            Transaction::Execution { ref mut id, .. } => *id = new_id,
+        };
+        Ok(self)
+    }
+
+    /// Calculate a sha256 hash of the contents of the transaction (dependent on the transaction type)
+    fn hash(&self) -> Result<String> {
+        let mut hasher = Sha256::new();
+
+        let variant_code: u8 = match self {
+            Transaction::Deployment { .. } => 0,
+            Transaction::Execution { .. } => 1,
+        };
+        hasher.update(variant_code.to_be_bytes());
+
+        match self {
+            Transaction::Deployment {
+                id: _id,
+                program,
+                verifying_keys,
+                fee,
+            } => {
+                hasher.update(program.id().to_string());
+
+                for (key, value) in verifying_keys.into_iter() {
+                    hasher.update(key.to_string());
+                    hasher.update(serde_json::to_string(value)?);
+                }
+
+                if let Some(fee) = fee {
+                    hasher.update(fee.to_string());
+                }
+            }
+            Transaction::Execution {
+                id: _id,
+                transitions,
+            } => {
+                for transition in transitions.iter() {
+                    hasher.update(serde_json::to_string(transition)?);
+                }
+            }
+        }
+
+        let hash = hasher.finalize().as_slice().to_owned();
+        Ok(hex::encode(hash))
     }
 
     // TODO: Move this to validator set/use tendermint-rs structs for pub keys?

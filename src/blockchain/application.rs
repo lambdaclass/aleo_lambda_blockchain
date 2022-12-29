@@ -378,6 +378,8 @@ impl SnarkVMApp {
     }
 
     fn validate_transaction(&self, transaction: &Transaction) -> Result<()> {
+        transaction.verify()?;
+
         let result = match transaction {
             Transaction::Deployment {
                 ref program,

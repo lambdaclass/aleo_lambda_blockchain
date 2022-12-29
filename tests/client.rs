@@ -73,9 +73,8 @@ fn program_validations() {
 
     // fail on already deployed compiled locally
     let error = client_command(home_path, &["program", "deploy", &program_path]).unwrap_err();
-    assert!(error.contains(
-        "Error executing transaction 1: Could not verify transaction: Program already exists"
-    ));
+
+    assert!(error.contains("Internal error: tx already exists in cache"));
 
     // execute the program, retrieving it from the blockchain, using it's id
     execute_program(home_path, &program_id, "hello", &["1u32", "1u32"]).unwrap();
