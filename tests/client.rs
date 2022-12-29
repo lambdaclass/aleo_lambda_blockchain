@@ -269,29 +269,16 @@ fn consume_records() {
 }
 
 #[test]
-fn validate_credits() {
+fn try_create_credits() {
     let (_tempfile, home_path, _) = &new_account();
 
-    let credits_path = "aleo/credits.aleo";
-
-    // test that executing the mint function fails
-    let output = execute_program(
-        home_path,
-        credits_path,
-        MINT_FUNCTION,
-        &["%account", "100u64"],
-    )
-    .err()
-    .unwrap();
-    assert!(output.contains("Coinbase functions cannot be called"));
-
-    let (_program_file, program_path, _) = load_program("credits");
+    let (_program_file, program_path, _) = load_program("records");
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
     let output = execute_program(
         home_path,
         &program_path,
-        MINT_FUNCTION,
-        &["%account", "100u64"],
+        "mint_credits",
+        &["100u64", "%account"],
     )
     .err()
     .unwrap();

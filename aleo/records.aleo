@@ -15,3 +15,10 @@ function consume:
      input r0 as token.record;
      add r0.amount 0u64 into r1;
      output r1 as u64.public;
+
+// this function is mainly used for testing that this is not possible
+function mint_credits:
+     input r0 as u64.public;
+     input r1 as address.public;
+     cast r1 r0 r0 into r2 as token.record;      
+     output r2 as token.record;

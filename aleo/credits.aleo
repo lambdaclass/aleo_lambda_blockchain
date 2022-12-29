@@ -10,12 +10,6 @@ record staked_credits:
     validator_higher as u128.public; 
     validator_lower as u128.public; 
 
-function mint:
-    input r0 as address.private;
-    input r1 as u64.private;
-    cast r0 r1 into r2 as credits.record;
-    output r2 as credits.record;
-
 function transfer:
     input r0 as credits.record;
     input r1 as address.private;
