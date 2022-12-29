@@ -348,7 +348,7 @@ A few changes have been introduced to the `credits.aleo` program to implement st
 
 * A new [staked_credits record type](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/aleo/credits.aleo#L7-L9), which is used as a way to "put credits aside" in exchange of voting power. (see [this task](https://trello.com/c/XszNFTYN/212-verify-that-credits-records-cant-be-used-interchangeably) to verify some assumptions around this decision).
 * A [stake function](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/aleo/credits.aleo#L50-L60) used to move an amount of aleo gates from a credits to a staked_credits record. In addition to generating output records, there are a number of public output values used by the nodes to update the validator state: the amount staked and the aleo account address doing the staking (the aleo address for the validator is necessary to know what owner to use for the reward records).
-* [An unstake function](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/aleo/credits.aleo#L62-L72) used for the inverse operation: moving gates back from staked_credits to credits. It is worth noting that this unstake operation takes as an input one of the records that are created by the stake function.  
+* [An unstake function](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/aleo/credits.aleo#L62-L72) used for the inverse operation: moving gates back from staked_credits to credits. It is worth noting that this unstake operation takes as an input one of the records that are created by the stake function.
 * In order to avoid unstaking credits from validators that were originally staked to different validators, the Public Key needs to be embedded in the `staked_credits` records. Because there is no specific data type that adjusts to this need, the tendermint validator Public Key is passed to aleo instructions through two `u128` literals. The key is both embedded in the records and also output as a public value for the blockchain to adjust voting power accordingly.
 
 
@@ -413,11 +413,32 @@ At the moment there's no validator slashing implementation. The Tendermint abci 
 
 ## Implementation notes
 
-*  The record store contains a DB of all existing records (essentially output records, with ciphertexts and commitments from executions), and a DB of spent records. Keeping track of the existence of records (along with their spent status) by using commitments is a security concern since it reveals data by enabling the possibility of linking records to users. Because of this, there is a need to track spending status of records by using their serial numbers (essentially records 'signed' by the user's private key used as inputs of executions).
-    *  This means that getting records owned by a user is not trivial since we need to get all records and produce serial numbers to cross-check with thespent serial number DB.
-    * Because we track the existence of records by their commitments and there is no way for the blockchain to relate them to a serial number, the current implementation does not enforce that the serial number that is an input on an execution does actually exist and is valid (for now, it is assumed to exist always). In order to solve this, there needs to be a proof included that shows that there is a valid merkle path to a record used as an input (currently not implemented).
+### Record commitments, serial numbers and validations
+The record store contains a DB of all existing records (essentially output records, with ciphertexts and commitments from executions), and a DB of spent records. Keeping track of the existence of records (along with their spent status) by using commitments is a security concern since it reveals data by enabling the possibility of linking records to users. Because of this, there is a need to track spending status of records by using their serial numbers (essentially records 'signed' by the user's private key used as inputs of executions). [This thread](https://forum.zcashcommunity.com/t/how-does-a-node-verify-a-nullifier-without-reveal-its-relation-to-its-correspond-commitment-in-zcash/20124) describe this model as used by Zcash.
 
-### Reference link
+*  This means that getting records owned by a user is not trivial since we need to get all records and produce serial numbers to cross-check with thespent serial number DB.
+* Because we track the existence of records by their commitments and there is no way for the blockchain to relate them to a serial number, the current implementation does not enforce that the serial number that is an input on an execution does actually exist and is valid (for now, it is assumed to exist always). In order to solve this, there needs to be a proof included that shows that there is a valid merkle path to a record used as an input (currently not implemented).
+
+The [previous implementation](https://github.com/lambdaclass/aleo-consensus/pull/80) favored integrity over privacy by storing separate list of spent and unspent commitments, so the blockchain could check that input records previously existed in the blockchain (and weren't already spent). This may be considered a better provisional solution until the merkle path proofs are incorporated.
+
+The proof of stake implementation works under the assumption that records are strongly typed, i.e. a record generated in one program can't be input to another, even if its member match; and another program can't just import the original and add arbitrary operations over the record. In particular, it's assumed that staked_credits records can't be used elsewhere in aleo programs, only to unstake voting power and receive credits in exchange. If this violates the current aleo model (as recent experimentation suggest), at least these options could be considered:
+
+* Add some sort of typing to the records (maybe optional?): include the program and record name as part of the record, and make the execution proofs verify them.
+* Stop using the staked_credits for staking, and rely entirely on the validator set to check that only existing voting power can be unstaked (and generate credits accordingly).
+
+This work is captured in [this ticket](https://trello.com/c/XszNFTYN/212-verify-that-credits-records-cant-be-used-interchangeably).
+
+### Other assumptions and known issues
+* The [vm module](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/lib/vm/mod.rs#L253-L283) of this project contains most interactions with SnarkVM (and it's planned to similarly contain the analog operations from [VMentropy](https://github.com/lambdaclass/VMtropy)). Note that part of the API of the module are ad hoc function to meet specific requirements without having to change or dig too deep in SnarkVM. Parts of SnarkVM were ported or circumvented, so there may be some implicit cryptographic assumptions that are not being met.
+* Transaction ids are generated as sha256 hashes of the transaction data, which allows integrity verification on the blockchain side. The use of merkle trees to generate the ids as previously done by SnarkVM was considered unnecessary for the purposes  this project.
+* The [thread rng](https://docs.rs/rand/0.5.0/rand/fn.thread_rng.html) is used in most places where SnarkVM interactions required random number generation. This may need to be revised for security.
+* SnarkVM generates certificates along with verifying and proving keys, intended to be used to verify deployment of new program verifying keys. This step was skipped in the current blockchain (no certificates are passed or verified). They could be added without much effort, though.
+* As described in the incentives section, some records need to be [created with a deterministic](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/lib/vm/mod.rs#L253-L283) nonce to guarantee all nodes in the blockchain generate the same record.
+* See notes about use of the abci [app hash](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/blockchain/application.rs#L263-L279), and this [related ticket](https://trello.com/c/Z6MuqNSk/215-consider-hasing-local-files-eg-validator-mappings-and-rocks-db-files-in-the-apphash-to-prevent-corruption).
+* See [notes](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/blockchain/application.rs#L127-L130) about mempool prioritization and this [related discussion](https://github.com/tendermint/tendermint/discussions/9772).
+
+
+### Reference links
 * [ABCI overview](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview)
 * [ABCI v0.34 reference](https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/abci.md)
 * [About why app hash is needed](https://github.com/tendermint/tendermint/issues/1179). Also [this](https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/apps.md#query-proofs).
