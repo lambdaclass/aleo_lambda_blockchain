@@ -59,9 +59,8 @@ sha2 = "0.10.6"
 base64 = "0.20.0"
 
 [dependencies.snarkvm]
-git = "https://github.com/Entropy1729/snarkVM.git"
-branch = "testnet3"
-#path = "../entropy/snarkVM"
+git = "https://github.com/lambdaclass/snarkVM.git"
+branch = "entropy_fork"
 features = ["circuit", "console", "parallel", "parameters"]
 
 [dev-dependencies]
