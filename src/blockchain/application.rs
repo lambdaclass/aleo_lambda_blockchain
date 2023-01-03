@@ -478,27 +478,131 @@ impl HeightFile {
     }
 }
 
-// just covering a few special cases here. lower level test are done in record store, higher level in integration tests.
+// just covering a few special cases here. lower level test are done in record store and program store, higher level in integration tests.
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use lib::{
+        transaction::Transaction,
+        vm::{self, Identifier},
+    };
+    use serde_json::json;
+    use std::{
+        path::Path,
+        str::FromStr,
+        sync::{Arc, Mutex},
+    };
+    use tendermint_abci::Application;
+    use tendermint_proto::abci::{RequestCheckTx, RequestDeliverTx};
+
+    use crate::{
+        program_store::ProgramStore, record_store::RecordStore, validator_set::ValidatorSet,
+    };
+
+    use super::SnarkVMApp;
 
     #[test]
-    fn test_check_tx() {
-        // TODO
-        // fail if duplicate (non spent) inputs
-        // fail if already spent inputs
-        // succeed otherwise
+    fn test_abci_hooks() {
+        let app = SnarkVMApp {
+            programs: ProgramStore::new("programs_test").expect("could not create a program store"),
+            records: RecordStore::new("records_test").expect("could not create a record store"),
+            validators: Arc::new(Mutex::new(ValidatorSet::load_or_create(Path::new("void")))),
+        };
+
+        let private_key = vm::PrivateKey::new(&mut rand::thread_rng()).unwrap();
+        let view_key = vm::ViewKey::try_from(&private_key).unwrap();
+        let address = vm::Address::try_from(&view_key).unwrap();
+
+        let program = vm::generate_program(include_str!("../../aleo/records.aleo")).unwrap();
+
+        // deploy the program to the app
+        let deployment_transaction =
+            Transaction::deployment(Path::new("aleo/records.aleo"), &private_key, None).unwrap();
+
+        let _ = app.store_program(&deployment_transaction);
+
+        // normal execution to mint a record, validations should succeed
+        let transaction = Transaction::execution(
+            program.clone(),
+            Identifier::from_str("mint").unwrap(),
+            &[
+                vm::u64_to_value(10),
+                vm::Value::from_str(&address.to_string()).unwrap(),
+            ],
+            &private_key,
+            None,
+        )
+        .unwrap();
+
+        let check_tx_req = check_request(&transaction);
+        assert!(app.check_tx(check_tx_req).code == 0);
+
+        let transaction_json = json!(transaction);
+
+        // extract the record to use in upcoming transactions
+        let output_record = transaction_json
+            .pointer("/Execution/transitions/0/outputs/0/value")
+            .unwrap()
+            .as_str()
+            .unwrap();
+
+        let ciphertext = vm::EncryptedRecord::from_str(output_record).unwrap();
+        let record = ciphertext
+            .decrypt(&view_key)
+            .map(vm::Value::Record)
+            .unwrap();
+
+        // utilize the same record twice
+        let consume_two_transaction = Transaction::execution(
+            program.clone(),
+            Identifier::from_str("consume_two").unwrap(),
+            &[record.clone(), record.clone()],
+            &private_key,
+            None,
+        )
+        .unwrap();
+
+        // both check_tx and deliver_tx validate that inputs are not being spent twice
+        let check_tx_req = check_request(&consume_two_transaction);
+        let deliver_tx_req = deliver_request(&consume_two_transaction);
+        assert!(app.check_tx(check_tx_req).code != 0);
+        assert!(app.deliver_tx(deliver_tx_req).code != 0);
+
+        // because validations failed, inputs should not be spent in the store
+        app.check_inputs_are_unspent(&consume_two_transaction)
+            .unwrap();
+
+        // consume the record
+        let consume_transaction = Transaction::execution(
+            program,
+            Identifier::from_str("consume").unwrap(),
+            &[record],
+            &private_key,
+            None,
+        )
+        .unwrap();
+
+        let check_tx_req = check_request(&consume_transaction);
+        let deliver_tx_req = deliver_request(&consume_transaction);
+
+        // because the transaction is valid, check and deliver should succeed
+        assert!(app.check_tx(check_tx_req.clone()).code == 0);
+        assert!(app.deliver_tx(deliver_tx_req.clone()).code == 0);
+
+        // because deliver_tx() spends the records, further validations should fail
+        assert!(app.check_tx(check_tx_req).code != 0);
+        assert!(app.deliver_tx(deliver_tx_req).code != 0);
     }
 
-    #[test]
-    fn test_deliver_tx() {
-        // fail if duplicate (non spent) inputs
-        // check that they remain unspent
+    fn check_request(transaction: &Transaction) -> RequestCheckTx {
+        RequestCheckTx {
+            tx: bincode::serialize(transaction).unwrap(),
+            r#type: 0,
+        }
+    }
 
-        // fail if already spent inputs
-
-        // check that inputs are not unspent anymore
-        // check that outputs are now unspent
+    fn deliver_request(transaction: &Transaction) -> RequestDeliverTx {
+        RequestDeliverTx {
+            tx: bincode::serialize(transaction).unwrap(),
+        }
     }
 }
