@@ -188,14 +188,17 @@ pub fn execution(
         .get_function(&function_name)
         .map_err(|e| anyhow!("{}", e))?;
 
-    let (compiled_function_variables, proof) = vmtropy::execute_function(&function, inputs)?;
+    let (compiled_function_variables, proof) =
+        vmtropy::execute_function(&program, &function, inputs)?;
 
     let inputs = vmtropy::jaleo::process_circuit_inputs(
         &function,
         &compiled_function_variables,
         private_key,
     )?;
-    let outputs = vmtropy::jaleo::process_circuit_outputs(&function, &compiled_function_variables)?;
+    let view_key = ViewKey::try_from(private_key)?;
+    let outputs =
+        vmtropy::jaleo::process_circuit_outputs(&function, &compiled_function_variables, view_key)?;
 
     let bytes_proof = vmtropy::jaleo::serialize_proof(proof)?;
     let encoded_proof = hex::encode(bytes_proof);
