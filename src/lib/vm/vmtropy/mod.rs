@@ -197,8 +197,24 @@ pub fn execution(
         private_key,
     )?;
     let view_key = ViewKey::try_from(private_key)?;
-    let outputs =
+    let mut outputs =
         vmtropy::jaleo::process_circuit_outputs(&function, &compiled_function_variables, view_key)?;
+
+    // This for loop deserves an explanation. The problem is the following:
+    // Because we currently don't support padding when encrypting records with AES,
+    // we have to keep track of the size of the record in the `original_size` field,
+    // otherwise when decrypting we don't know when to stop. This makes the `ciphertext` field
+    // of an encrypted record not enough to get the original record back. Because CLI users
+    // rely on the `ciphertext` field to pass records to spend, we have to modify this value with
+    // the full serialized `EncryptedRecord` struct so it can be used to spend them.
+    for (_name, output) in outputs.iter_mut() {
+        if let VariableType::EncryptedRecord(record) = output {
+            let mut prefixed_serialized_record = "record".to_owned();
+            let serialized = hex::encode(record.to_string().as_bytes());
+            prefixed_serialized_record.push_str(&serialized);
+            record.ciphertext = prefixed_serialized_record;
+        }
+    }
 
     let bytes_proof = vmtropy::jaleo::serialize_proof(proof)?;
     let encoded_proof = hex::encode(bytes_proof);

@@ -448,7 +448,11 @@ async fn run_credits_command(
 fn parse_input_value(input: &str) -> Result<vm::UserInputValueType> {
     // try parsing an encrypted record string
     if input.starts_with("record") {
-        return parse_input_record(input);
+        #[cfg(feature = "vmtropy_backend")]
+        return parse_input_record(&input[6..]);
+
+        #[cfg(feature = "snarkvm_backend")]
+        return parse_input_record(&input);
     }
 
     // %account is a syntactic sugar for current user address
@@ -467,9 +471,14 @@ fn parse_input_value(input: &str) -> Result<vm::UserInputValueType> {
 }
 
 pub fn parse_input_record(input: &str) -> Result<vm::UserInputValueType> {
-    let ciphertext: EncryptedRecord = serde_json::from_str(input)?;
+    #[cfg(feature = "vmtropy_backend")]
+    let encrypted_record = EncryptedRecord::try_from(&(hex::decode(input)?.to_vec()))?;
+
+    #[cfg(feature = "snarkvm_backend")]
+    let encrypted_record = vm::EncryptedRecord::from_str(input)?;
+
     let credentials = account::Credentials::load()?;
-    ciphertext
+    encrypted_record
         .decrypt(&credentials.view_key)
         .map(vm::UserInputValueType::Record)
 }
