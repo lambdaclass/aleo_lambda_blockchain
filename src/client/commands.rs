@@ -677,12 +677,6 @@ mod tests {
     }
 
     fn mint_record(view_key: &vm::ViewKey, amount: u64) -> vm::Record {
-        println!(
-            "{:?}",
-            vm::mint_record("credits.aleo", "credits", view_key, amount, 123)
-                .unwrap()
-                .1
-        );
         vm::mint_record("credits.aleo", "credits", view_key, amount, 123)
             .unwrap()
             .1
