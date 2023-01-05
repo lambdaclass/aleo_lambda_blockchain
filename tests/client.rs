@@ -289,8 +289,13 @@ fn validate_credits() {
     .unwrap();
     assert!(output.contains("Coinbase functions cannot be called"));
 
+    // These checks don't make sense when using VMtropy because there are no
+    // checks for which program you can call.
+    #[cfg(feature = "snarkvm_backend")]
     let (_program_file, program_path, _) = load_program("credits");
+    #[cfg(feature = "snarkvm_backend")]
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
+    #[cfg(feature = "snarkvm_backend")]
     let output = execute_program(
         home_path,
         &program_path,
@@ -299,6 +304,7 @@ fn validate_credits() {
     )
     .err()
     .unwrap();
+    #[cfg(feature = "snarkvm_backend")]
     assert!(output.contains("is not satisfied on the given inputs"));
 }
 
@@ -685,11 +691,13 @@ fn get_decrypted_record(transaction: &serde_json::Value) -> (&str, &str, &str) {
 }
 
 fn get_encrypted_record(transaction: &serde_json::Value) -> &str {
-    transaction
-        .pointer("/Execution/transitions/0/outputs/0/value")
-        .unwrap()
-        .as_str()
-        .unwrap()
+    #[cfg(feature = "snarkvm_backend")]
+    let pointer_path = "/Execution/transitions/0/outputs/0/value";
+
+    #[cfg(feature = "vmtropy_backend")]
+    let pointer_path = "/Execution/transitions/0/outputs/0/EncryptedRecord/ciphertext";
+
+    transaction.pointer(pointer_path).unwrap().as_str().unwrap()
 }
 
 fn assert_balance(path: &str, expected: u64) -> Result<(), retry::Error<String>> {
