@@ -11,6 +11,7 @@ pub type Address = Vec<u8>;
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Validator {
     pub aleo_address: vm::Address,
+    pub aleo_view_key: vm::ViewKey,
     pub_key: tendermint::PublicKey,
     voting_power: VotingPower,
 }
@@ -24,17 +25,23 @@ pub struct GenesisState {
 impl Validator {
     /// Construct a new validator from a base64 encoded ed25519 public key string (as it appears in tendermint JSON files)
     /// And an Aleo address string.
-    pub fn from_str(pub_key: &str, aleo_address: &str) -> Result<Self> {
+    pub fn from_str(pub_key: &str, aleo_address: &str, aleo_view_key: &str) -> Result<Self> {
         let aleo_address = vm::Address::from_str(aleo_address)?;
+        let aleo_view_key = vm::ViewKey::from_str(aleo_view_key)?;
         let pub_key = tendermint::PublicKey::from_raw_ed25519(&base64::decode(pub_key)?)
             .ok_or_else(|| anyhow!("failed to generate tendermint public key"))?;
-        Ok(Self::new(pub_key, aleo_address))
+        Ok(Self::new(pub_key, aleo_address, aleo_view_key))
     }
 
-    fn new(pub_key: tendermint::PublicKey, aleo_address: vm::Address) -> Self {
+    fn new(
+        pub_key: tendermint::PublicKey,
+        aleo_address: vm::Address,
+        aleo_view_key: vm::ViewKey,
+    ) -> Self {
         Self {
             pub_key,
             aleo_address,
+            aleo_view_key,
             voting_power: 0,
         }
     }

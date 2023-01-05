@@ -622,11 +622,10 @@ mod tests {
     fn select_default_record() {
         let private_key = vm::PrivateKey::new(&mut rand::thread_rng()).unwrap();
         let view_key = vm::ViewKey::try_from(&private_key).unwrap();
-        let address = vm::Address::try_from(&view_key).unwrap();
 
-        let record10 = mint_record(&address, &view_key, 10);
-        let record5 = mint_record(&address, &view_key, 5);
-        let record6 = mint_record(&address, &view_key, 6);
+        let record10 = mint_record(&view_key, 10);
+        let record5 = mint_record(&view_key, 5);
+        let record6 = mint_record(&view_key, 6);
 
         // if no records in account, fail
         let error = select_default_fee_record(10, &[], &[]).unwrap_err();
@@ -677,8 +676,14 @@ mod tests {
         assert_eq!(record6, result);
     }
 
-    fn mint_record(address: &vm::Address, view_key: &vm::ViewKey, amount: u64) -> vm::Record {
-        vm::mint_record("credits.aleo", "credits", address, amount, 123)
+    fn mint_record(view_key: &vm::ViewKey, amount: u64) -> vm::Record {
+        println!(
+            "{:?}",
+            vm::mint_record("credits.aleo", "credits", view_key, amount, 123)
+                .unwrap()
+                .1
+        );
+        vm::mint_record("credits.aleo", "credits", view_key, amount, 123)
             .unwrap()
             .1
             .decrypt(view_key)

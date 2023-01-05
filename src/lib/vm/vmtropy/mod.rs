@@ -255,7 +255,7 @@ fn sha3_hash(input: &[u8]) -> String {
 pub fn mint_record(
     _program_id: &str,
     _record_name: &str,
-    owner_address: &Address,
+    owner_view_key: &ViewKey,
     gates: u64,
     _seed: u64,
 ) -> Result<(Field, EncryptedRecord)> {
@@ -264,5 +264,5 @@ pub fn mint_record(
     // The seed is used for instantiating a randomizer, which is used to generate the nonce
     // and encrypt the record. Once again, we don't really do things that way for now.
 
-    mint_credits(owner_address, gates)
+    mint_credits(owner_view_key, gates)
 }

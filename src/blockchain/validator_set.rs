@@ -165,7 +165,7 @@ impl ValidatorSet {
                 let record = vm::mint_record(
                     "credits.aleo",
                     "credits",
-                    &validator.aleo_address,
+                    &validator.aleo_view_key,
                     credits,
                     self.current_height,
                 )
@@ -205,10 +205,14 @@ mod tests {
         let aleo3 = account_keys();
         let aleo4 = account_keys();
 
-        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
-        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
-        let validator3 = Validator::from_str(tmint3, &aleo3.1.to_string()).unwrap();
-        let validator4 = Validator::from_str(tmint4, &aleo4.1.to_string()).unwrap();
+        let validator1 =
+            Validator::from_str(tmint1, &aleo1.1.to_string(), &aleo1.0.to_string()).unwrap();
+        let validator2 =
+            Validator::from_str(tmint2, &aleo2.1.to_string(), &aleo2.0.to_string()).unwrap();
+        let validator3 =
+            Validator::from_str(tmint3, &aleo3.1.to_string(), &aleo3.0.to_string()).unwrap();
+        let validator4 =
+            Validator::from_str(tmint4, &aleo4.1.to_string(), &aleo4.0.to_string()).unwrap();
 
         // create validator set, set validators with voting power
         let mut set = ValidatorSet::new("abci.validators.test.1");
@@ -284,8 +288,10 @@ mod tests {
         let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
         let aleo1 = account_keys();
         let aleo2 = account_keys();
-        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
-        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
+        let validator1 =
+            Validator::from_str(tmint1, &aleo1.1.to_string(), &aleo1.0.to_string()).unwrap();
+        let validator2 =
+            Validator::from_str(tmint2, &aleo2.1.to_string(), &aleo2.0.to_string()).unwrap();
 
         // create validator set, set validators with voting power
         let mut set = ValidatorSet::new("abci.validators.test.1");
@@ -328,8 +334,10 @@ mod tests {
         let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
         let aleo1 = account_keys();
         let aleo2 = account_keys();
-        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
-        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
+        let validator1 =
+            Validator::from_str(tmint1, &aleo1.1.to_string(), &aleo1.0.to_string()).unwrap();
+        let validator2 =
+            Validator::from_str(tmint2, &aleo2.1.to_string(), &aleo2.0.to_string()).unwrap();
         let validators = vec![validator1.clone(), validator2.clone()];
 
         let mut set1 = ValidatorSet::new("abci.validators.test.2");
@@ -384,8 +392,10 @@ mod tests {
         let tmint2 = "2HWbuGk04WQm/CrI/0HxoEtjGY0DXp8oMY6RsyrWwbU=";
         let aleo1 = account_keys();
         let aleo2 = account_keys();
-        let validator1 = Validator::from_str(tmint1, &aleo1.1.to_string()).unwrap();
-        let validator2 = Validator::from_str(tmint2, &aleo2.1.to_string()).unwrap();
+        let validator1 =
+            Validator::from_str(tmint1, &aleo1.1.to_string(), &aleo1.0.to_string()).unwrap();
+        let validator2 =
+            Validator::from_str(tmint2, &aleo2.1.to_string(), &aleo2.0.to_string()).unwrap();
 
         // create validator set, set validators with voting power
         let mut set = ValidatorSet::new("abci.validators.test.1");

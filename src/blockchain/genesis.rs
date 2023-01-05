@@ -59,6 +59,7 @@ fn main() -> Result<()> {
         let aleo_account: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(aleo_account_path)?)?;
         let aleo_address = aleo_account["address"].as_str().unwrap();
+        let aleo_view_key = aleo_account["view_key"].as_str().unwrap();
 
         let tmint_account_path = node_dir.join("config/priv_validator_key.json");
         let tmint_account: serde_json::Value =
@@ -66,7 +67,8 @@ fn main() -> Result<()> {
         let tmint_pubkey = tmint_account["pub_key"]["value"]
             .as_str()
             .expect("couldn't extract pubkey from json");
-        let mut validator = validator::Validator::from_str(tmint_pubkey, aleo_address)?;
+        let mut validator =
+            validator::Validator::from_str(tmint_pubkey, aleo_address, aleo_view_key)?;
         validator.add_voting_power(*voting_powers.get(tmint_pubkey).unwrap() as i64)?;
 
         println!("Generating record for {aleo_address}");
@@ -74,7 +76,7 @@ fn main() -> Result<()> {
         let record = vm::mint_record(
             "credits.aleo",
             "credits",
-            &validator.aleo_address,
+            &validator.aleo_view_key,
             cli.amount,
             1234,
         )?;

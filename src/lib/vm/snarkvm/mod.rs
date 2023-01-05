@@ -304,14 +304,15 @@ pub fn compute_serial_number(private_key: PrivateKey, commitment: Field) -> Resu
 pub fn mint_record(
     program_id: &str,
     record_name: &str,
-    owner_address: &Address,
+    owner_view_key: &ViewKey,
     gates: u64,
     seed: u64,
 ) -> Result<(Field, EncryptedRecord)> {
     // TODO have someone verify/audit this, probably it's unsafe or breaks cryptographic assumptions
 
+    let owner_address = Address::try_from(owner_view_key)?;
     let owner = Owner::Private(Plaintext::Literal(
-        Literal::Address(*owner_address),
+        Literal::Address(owner_address),
         Default::default(),
     ));
     let amount = Integer::new(gates);
