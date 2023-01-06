@@ -1,6 +1,35 @@
-# Aleo Consensus
+# Aleo-Lambda Blockchain
 
-MVP for an aleo blockchain. The current implementation uses a thin wrapper around some layers of [this SnarkVM fork](https://github.com/Entropy1729/snarkVM) and [Tendermint](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html) for the blockchain and consensus.
+This repository contains an implementation of the Aleo verifiable computing model built by [LambdaClass](https://github.com/lambdaclass). Users can run arbitrary private programs off-chain, generate proofs and send them over to a blockchain for transaction storage. 
+
+The current implementation allows for two different VM backends to compile and compute Aleo programs: 
+- Our [fork of Aleo's SnarkVM](https://github.com/lambdaclass/snarkVM).
+- A [VM implementation](https://github.com/lambdaclass/VMtropy) built from scratch.
+
+The consensus/blockchain engine has been built with [Tendermint Core](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html).
+
+## Table of Contents  
+
+- [Aleo-Lambda Blockchain](#aleo-lambda-blockchain)
+  - [Project structure](#project-structure)
+  - [Example application usage](#example-application-usage)
+    - [Sending programs and executions to the blockchain](#sending-deploys-and-executions-to-the-blockchain)
+  - [Other features](#other-features)
+    - [Debugging the client/ABCI](#debugging-the-clientabci)
+    - [Setting the blockchain endpoint](#setting-the-blockchain-endpoint)
+    - [See available CLI parameters](#see-available-cli-parameters)
+    - [Execute without changing the state of the blockchain](#execute-without-changing-the-state-of-the-blockchain)
+    - [Running multiple nodes with Docker Compose](#running-multiple-nodes-with-Docker-Compose)
+  - [Running tests](#running-tests)
+  - [Working with records](#working-with-records)
+  - [Initialize validators](#initialize-validators)
+  - [Design](#design)
+    - [Credits and Incentives](#credits-and-incentives)
+  - [Implementation notes](#implementation-notes)
+    - [Record commitments, serial numbers and validations](#record-commitments-serial-numbers-and-validations)
+    - [Other assumptions and known issues](#other-assumptions-and-known-issues)
+    - [Reference links](#reference-links)
+
 
 ## Project structure
 
@@ -11,11 +40,11 @@ MVP for an aleo blockchain. The current implementation uses a thin wrapper aroun
 * [src/lib/](./src/lib/): Shared library used by the CLI and the ABCI.
 
 
-## Running a single-node blockchain
+## Example application usage
 
-Requires Rust and `jq` to be installed.
+Requires [Rust](https://www.rust-lang.org/tools/install) and [`jq`](https://stedolan.github.io/jq/) to be installed.
 
-Run `snarkvm_abci`:
+Run the ABCI (Application Blockchain Interface) application in a terminal:
 
 ```shell
 make abci
@@ -27,18 +56,20 @@ This will have our ABCI app running and ready to connect to a tendermint node:
 2022-11-07T20:32:21.577768Z  INFO ThreadId(01) ABCI server running at 127.0.0.1:26658
 ```
 
-In another terminal run the tendermint node:
+In another terminal run the Tendermint node:
 
 ```shell
 make node
 ```
 
-This will download and install tendermint if necessary. Alternatively, [these instructions](https://github.com/tendermint/tendermint/blob/main/docs/introduction/install.md) can be used. This will also generate the genesis file for the starting state of the blockchain.
-Be sure to checkout version `0.34.x` as current rust abci implementation does not support `0.35.0` (`0.34` is the latest public release).
+This will download and install Tendermint Core if necessary. Alternatively, [these instructions](https://github.com/tendermint/tendermint/blob/main/docs/introduction/install.md) can be used. This will also generate the genesis file for the starting state of the blockchain.
+Be sure to checkout version `0.34.x` as current Rust ABCI implementation does not support `0.35.0` (`0.34` is the latest public release).
 
-At this point, both terminals should start to exchange messages and `Commited height` should start to grow.
+At this point, both terminals should start to exchange messages and `Commited height` should start to grow. This means the blockchain is up and running. We are now ready to send transactions with the CLI.
 
-## Sending deploys and executions to the blockchain
+Note that you can also [run multiple nodes of the blockchain locally with docker compose](#running-multiple-nodes-with-docker-compose).
+
+### Sending programs and executions to the blockchain
 
 On another terminal, compile the command-line client:
 
@@ -56,7 +87,7 @@ bin/aleo program deploy aleo/hello.aleo
 
 That should take some time to create the deployment transaction and send it to the Tendermint network. In the client terminal you should see a JSON response similar to the following one:
 
-```
+```json
 {
   "Deployment": {
     "deployment": {
@@ -74,7 +105,7 @@ That should take some time to create the deployment transaction and send it to t
 ```
  You should also see the transaction being received in the ABCI terminal with some message like:
 
-```
+```shell
 2022-12-06T19:13:22.456235Z  INFO ThreadId(06) Check Tx
 2022-12-06T19:13:22.691738Z  INFO ThreadId(06) Transaction Deployment(7999aa60-ad74-45d2-aa57-f75cb01ac653,hello.aleo) verification successful
 2022-12-06T19:13:22.695360Z  INFO ThreadId(07) Committing height 2
@@ -102,7 +133,7 @@ bin/aleo program execute aleo/hello.aleo hello 1u32 1u32
 
 The command above will run the program and send the execution to the blockchain:
 
-```
+```json
 {
   "Execution": {
     "id": "15499c5b-b0b7-46eb-87da-366f38cc485c",
@@ -141,13 +172,15 @@ The command above will run the program and send the execution to the blockchain:
 ```
 Again, we see the transaction (of type `Execution`) and its ID, which means the execution was sent out to the network sucesfully.
 
-After each execution, tendermint node may be left in an invalid state. If that's the case run:
+After each execution, Tendermint node may be left in an invalid state. If that's the case run:
 
 ```shell
 make reset
 ```
 
 to restore the initial state. Notice that this will delete the databases that store the programs and the records, so previous deployments and account records will be deleted.
+
+## Other features
 
 ### Debugging the client/ABCI
 
@@ -164,6 +197,42 @@ In order to see all different commands and parameters that the CLI can take, you
 
 You can execute programs in the way as you normally would but without sending the proofs to the blockchain by using the `--dry-run` parameter: `program execute aleo/hello.aleo 1u64 1u64 --dry-run`. This will display the same output as normal, and will also attempt to decrypt output records with the active credentials.
 
+### Running multiple nodes with Docker Compose
+
+This requires having docker (with docker-compose) installed.
+
+Then build the `snarkvm_abci` image:
+
+```shell
+make localnet-build-abci
+```
+
+And to start the test net run:
+
+```shell
+make localnet-start
+```
+
+Note that each node will require more than 2Gb to run so docker should be configured to use 10Gb or more in order to work with the default 4 nodes.
+
+To modify the configuration you should edit `docker-compose.yml` file
+
+The configuration mounts some volumes in the `testnet/node{_}/` directories, and in case the tendermint nodes state needs to be reset, just run:
+
+```shell
+make localnet-reset
+```
+
+or delete all the `node{_}` dirs to remove local `snarkvm_abci` data (it will require to download all the parameters on next run).
+
+You will find an `account.json` file in each `testnet/node{_}/` directory, with the aleo credentials of the validators (usable to run commands with the credits of the validators). On a MacOS docker deploy, each of the 4 testnet nodes will be exposed on ports 26657, 26660, 26663, 26666 of localhost.
+
+Thus, you can interact with the network from the host like this:
+
+```shell
+ALEO_HOME=testnet/node1/ bin/aleo --url http://127.0.0.1:26657 account balance
+```
+
 ## Running tests
 
 In order to run tests, make sure the ABCI and the Tendermint Node are currently (`make abci` and `make node` respectively) running locally, and run `make test`.
@@ -176,7 +245,7 @@ In order to work with records, there are some things to keep in mind. As an exam
 program execute aleo/token.aleo mint 12u64 {address}
 ```
 
-````
+````json
 {
   "Execution": {
     "id": "13a6e12f-c1be-46ce-b88e-9f3d74c7f9f5",
@@ -221,47 +290,12 @@ You can use your address from the account creation here. You can see the output 
 
 In order to initialize the necessary files that would be required on a testnet, you can run:
 
-````
+````shell
 make VALIDATORS=3 testnet
 ````
 
 This will create subdirectories in `/mytestnet/` for each of the validators (defaults to 4 if it's not passed as a parameter). This means that there are files for the private validator keys, account info and genesis state. This way the nodes are able to translate a tendermint validator address to an aleo account, which in turn are used to generate reward records.
 
-## Running multiple nodes on docker compose
-
-This requires having docker (with docker-compose) installed.
-
-Then build the `snarkvm_abci` image:
-
-```
-make localnet-build-abci
-```
-
-And to start the test net run:
-
-```
-make localnet-start
-```
-
-Note that each node will require more than 2Gb to run so docker should be configured to use 10Gb or more in order to work with the default 4 nodes.
-
-To modify the configuration you should edit `docker-compose.yml` file
-
-The configuration mounts some volumes in the `testnet/node{_}/` directories, and in case the tendermint nodes state needs to be reset, just run:
-
-```
-make localnet-reset
-```
-
-or delete all the `node{_}` dirs to remove local `snarkvm_abci` data (it will require to download all the parameters on next run).
-
-You will find an `account.json` file in each `testnet/node{_}/` directory, with the aleo credentials of the validators (usable to run commands with the credits of the validators). On a MacOS docker deploy, each of the 4 testnet nodes will be exposed on ports 26657, 26660, 26663, 26666 of localhost.
-
-Thus, you can interact with the network from the host like this:
-
-```
-ALEO_HOME=testnet/node1/ bin/aleo --url http://127.0.0.1:26657 account balance
-```
 
 ## Design
 
@@ -272,7 +306,7 @@ The diagram below describes the current architecture of the system:
 * The blockchain nodes run in a peer to peer network where each node contains a Tendermint core and an application process.
 * Tendermint core handles the basic functions of a blockchain: p2p networking, receiving transactions and relying them to peers, running a consensus algorithm to propose and vote for blocks and keeping a ledger of committed transactions.
 * The application tracks application-specific logic and state. The state is derived from the transactions seen by the node (in our case, the set of spent and unspent records, and the deployed program certificates). The logic includes validating the execution transactions by verifying their proofs.
-* The application is isolated from the outer world and communicates exclusively with the tendermint process through specific hooks of the Application Blockchain Interface (abci). For example: the `CheckTx` hook is used to validate transactions before putting them in the local mempool and relaying them to the peers, the `DeliverTx` writes application state changes derived from transactions included in a block and the `Commit` hook applies those changes when the block is committed to the ledger.
+* The application is isolated from the outer world and communicates exclusively with the tendermint process through specific hooks of the Application Blockchain Interface (ABCI). For example: the `CheckTx` hook is used to validate transactions before putting them in the local mempool and relaying them to the peers, the `DeliverTx` writes application state changes derived from transactions included in a block and the `Commit` hook applies those changes when the block is committed to the ledger.
 * The ABCI application contains two components related to maintaining the state of the blockchain network: The program store and the record store. As their names imply, they are in charge of persisting and retrieveing programs that have been committed by users and keeping track of records and their spending status respectively.
 
 These interactions between tendermint core and the application are depicted below:
@@ -358,11 +392,11 @@ The CLI, in turn, exposes a couple of commands to handle execution of those func
 
     bin/aleo credits unstake 50 record1qyqsqa2luw8spua6us6y56t9gfv7fqrg93dtpf7z7kglykf3s3q4pwcgqyqsqxuprwvqcl8s3f3vmcch329e28cy80duxmeu42wkswex03d6urgdqqqpw66xrpzhpj0ujp5susqu6u4zwkr5alpx26x4ugyz5qvkfenz6pc5sqpae
 
-In the first example, the last argument `fWT3sfhFB2Xgi3Uo7rKam1mLisbRc78Knw4as6vSIQw` corresponds to a tendermint validator node public key, so when e.g. a stake execution is accepted by the blockchain, the amount of staked credits is extracted from the transition outpus, converted to tendermint voting power and passed over to tendermint core in the [end_block ABCI hook](https://github.com/lambdaclass/aleo-consensus/blob/HEAD/src/blockchain/application.rs#L241-L259).
+In the first example, the last argument `fWT3sfhFB2Xgi3Uo7rKam1mLisbRc78Knw4as6vSIQw` corresponds to a Tendermint validator node public key, so when e.g. a stake execution is accepted by the blockchain, the amount of staked credits is extracted from the transition outpus, converted to Tendermint voting power and passed over to Tendermint core in the [end_block ABCI hook](https://github.com/lambdaclass/aleo-consensus/blob/HEAD/src/blockchain/application.rs#L241-L259).
 
 In the second example, the validator public key is not included as an argument because it is taken from the input record (which is the output of a staking operation).
 
-In the tendermint core side, the [behavior](https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/apps.md#endblock) of voting power changes is:
+In the Tendermint core side, the [behavior](https://github.com/Tendermint/Tendermint/blob/v0.34.x/spec/abci/apps.md#endblock) of voting power changes is:
 
 * if power is 0, the validator must already exist, and will be removed from the validator set
 * if power is non-0:
@@ -373,7 +407,7 @@ In the tendermint core side, the [behavior](https://github.com/tendermint/tender
 Notice that this model assumes that only one aleo account per validator is doing staking. In the future this could be changed to have multiple aleo accounts delegate their stake to the node, which could also be a means to increase the privacy of stakers.
 
 #### Genesis block
-The genesis block of tendermint blockchains is setup via a [genesis.json file](https://docs.tendermint.com/v0.34/tendermint-core/using-tendermint.html#genesis) in the tendermint home directory. Its `"app_state"` field is used to pass arbitrary initialization data to the ABCI application, read in the [init_chain hook](https://github.com/lambdaclass/aleo-consensus/blob/HEAD/src/blockchain/application.rs#L32-L54). This is currently being used to set an initial list of validator nodes, the mapping of validator public keys to aleo accounts to be used as reward record owners and a list of default records to be stored in the record store for an initial supply of aleo credits to circulate (in addition to the baseline credits that will be generated on each new block). The app state for a 4 validator testnet looks like this:
+The genesis block of Tendermint blockchains is setup via a [genesis.json file](https://docs.Tendermint.com/v0.34/Tendermint-core/using-Tendermint.html#genesis) in the Tendermint home directory. Its `"app_state"` field is used to pass arbitrary initialization data to the ABCI application, read in the [init_chain hook](https://github.com/lambdaclass/aleo-consensus/blob/HEAD/src/blockchain/application.rs#L32-L54). This is currently being used to set an initial list of validator nodes, the mapping of validator public keys to aleo accounts to be used as reward record owners and a list of default records to be stored in the record store for an initial supply of aleo credits to circulate (in addition to the baseline credits that will be generated on each new block). The app state for a 4 validator testnet looks like this:
 
 ``` json
 {
@@ -406,10 +440,10 @@ The genesis block of tendermint blockchains is setup via a [genesis.json file](h
 
 New validators can join the network after genesis by staking credits as described in the previous section.
 
-There's a [genesis program](https://github.com/lambdaclass/aleo-consensus/blob/HEAD/src/blockchain/genesis.rs) used to generate this app state and a [make target](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/Makefile#L44-L54) to initialize tendermint testnets with a valid genesis.
+There's a [genesis program](https://github.com/lambdaclass/aleo-consensus/blob/HEAD/src/blockchain/genesis.rs) used to generate this app state and a [make target](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/Makefile#L44-L54) to initialize Tendermint testnets with a valid genesis.
 
 #### Slashing
-At the moment there's no validator slashing implementation. The Tendermint abci hooks [provide information](https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/abci.md#beginblock) to infer if a validator has deviated from the protocol, but custom application logic would need to be added to punish those validators by subtracting credits (which may require some changes in the current design).
+At the moment there's no validator slashing implementation. The Tendermint abci hooks [provide information](https://github.com/Tendermint/Tendermint/blob/v0.34.x/spec/abci/abci.md#beginblock) to infer if a validator has deviated from the protocol, but custom application logic would need to be added to punish those validators by subtracting credits (which may require some changes in the current design).
 
 ## Implementation notes
 
@@ -435,7 +469,7 @@ This work is captured in [this ticket](https://trello.com/c/XszNFTYN/212-verify-
 * SnarkVM generates certificates along with verifying and proving keys, intended to be used to verify deployment of new program verifying keys. This step was skipped in the current blockchain (no certificates are passed or verified). They could be added without much effort, though.
 * As described in the incentives section, some records need to be [created with a deterministic](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/lib/vm/mod.rs#L253-L283) nonce to guarantee all nodes in the blockchain generate the same record.
 * See notes about use of the abci [app hash](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/blockchain/application.rs#L263-L279), and this [related ticket](https://trello.com/c/Z6MuqNSk/215-consider-hasing-local-files-eg-validator-mappings-and-rocks-db-files-in-the-apphash-to-prevent-corruption).
-* See [notes](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/blockchain/application.rs#L127-L130) about mempool prioritization and this [related discussion](https://github.com/tendermint/tendermint/discussions/9772).
+* See [notes](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/blockchain/application.rs#L127-L130) about mempool prioritization and this [related discussion](https://github.com/Tendermint/Tendermint/discussions/9772).
 
 
 ### Reference links
