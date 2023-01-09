@@ -493,7 +493,15 @@ fn staking() {
 
     assert_balance(receiver_home, 50).unwrap();
 
-    let record = client_command(receiver_home, &["account", "records"])
+    let user_record = client_command(receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let validator_record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
         .unwrap()
@@ -504,7 +512,13 @@ fn staking() {
     // try to stake more than available, fail
     let error = client_command(
         receiver_home,
-        &["credits", "stake", "60", &record, &tendermint_validator],
+        &[
+            "credits",
+            "stake",
+            "60",
+            &user_record,
+            &tendermint_validator,
+        ],
     )
     .unwrap_err();
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
@@ -513,10 +527,30 @@ fn staking() {
 
     // TODO add check: try to stake for an unexistent validator, fail
 
-    // stake all available
-    let transaction = client_command(
+    // stake all available, but fail because this is not the expected aleo account
+    let error = client_command(
         receiver_home,
-        &["credits", "stake", "50", &record, &tendermint_validator],
+        &[
+            "credits",
+            "stake",
+            "50",
+            &user_record,
+            &tendermint_validator,
+        ],
+    )
+    .unwrap_err();
+    assert!(error.contains("attempted to apply a staking update on a different aleo account"));
+
+    // stake some credits from the validator account
+    let transaction = client_command(
+        &validator_home,
+        &[
+            "credits",
+            "stake",
+            "5",
+            &validator_record,
+            &tendermint_validator,
+        ],
     )
     .unwrap();
 
@@ -528,8 +562,8 @@ fn staking() {
 
     // try to unstake more than available, fail
     let error = client_command(
-        receiver_home,
-        &["credits", "unstake", "60", staked_credits_record],
+        &validator_home,
+        &["credits", "unstake", "15", staked_credits_record],
     )
     .unwrap_err();
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
@@ -538,10 +572,12 @@ fn staking() {
 
     // unstake all available
     client_command(
-        receiver_home,
-        &["credits", "unstake", "50", staked_credits_record],
+        &validator_home,
+        &["credits", "unstake", "5", staked_credits_record],
     )
     .unwrap();
+
+    // TODO: Test to see if the validator_set file actually gets updated with staking updates
 }
 
 // HELPERS

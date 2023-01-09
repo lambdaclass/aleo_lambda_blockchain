@@ -165,7 +165,7 @@ impl Transaction {
         let mut result = Vec::new();
         if let Self::Execution { transitions, .. } = self {
             for transition in transitions {
-                if transition.program_id().to_string() == "credits" {
+                if transition.program_id().to_string() == "credits.aleo" {
                     let extract_output = |index: usize| {
                         transition
                             .outputs()
@@ -179,8 +179,10 @@ impl Transaction {
                         _ => continue,
                     };
 
-                    let validator_lower: u128 = vm::int_from_output(extract_output(4)?)?;
-                    let validator_higher: u128 = vm::int_from_output(extract_output(5)?)?;
+                    // TODO: Factor out the following extraction and test it as with the original conversion
+
+                    let validator_higher: u128 = vm::int_from_output(extract_output(4)?)?;
+                    let validator_lower: u128 = vm::int_from_output(extract_output(5)?)?;
 
                     let validator = Transaction::validator_address_from_numbers(
                         validator_higher,

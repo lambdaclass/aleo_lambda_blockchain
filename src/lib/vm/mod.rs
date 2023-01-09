@@ -328,6 +328,7 @@ pub fn address_from_output(output: &Output) -> Result<Address> {
     if let Output::Public(_, Some(Plaintext::Literal(Literal::Address(value), _))) = output {
         return Ok(*value);
     };
+
     bail!("output type extraction not supported");
 }
 

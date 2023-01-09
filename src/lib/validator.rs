@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::{anyhow, ensure, Result};
+use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::vm;
@@ -134,6 +135,7 @@ impl std::fmt::Display for Stake {
 }
 
 fn parse_pub_key(key: &str) -> Result<tendermint::PublicKey> {
+    debug!("key: {}", key);
     tendermint::PublicKey::from_raw_ed25519(&base64::decode(key)?)
         .ok_or_else(|| anyhow!("failed to generate tendermint public key"))
 }
