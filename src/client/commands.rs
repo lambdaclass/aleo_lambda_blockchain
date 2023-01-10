@@ -46,7 +46,6 @@ pub enum Credits {
         #[clap(value_parser=parse_input_value)]
         recipient_address: vm::UserInputValueType,
         #[cfg(feature = "snarkvm_backend")]
-        #[clap(value_parser=parse_input_value)]
         amount: u64,
         #[cfg(feature = "vmtropy_backend")]
         amount: u64,
@@ -61,7 +60,6 @@ pub enum Credits {
     Split {
         #[clap(value_parser=parse_input_record)]
         input_record: vm::UserInputValueType,
-        #[clap(value_parser=parse_input_value)]
         amount: u64,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]

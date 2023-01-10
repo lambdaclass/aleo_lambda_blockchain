@@ -39,11 +39,13 @@ fn basic_program() {
 
     // get execution tx, assert expected output
     let transaction = retry_command(home_path, &["get", transaction_id]).unwrap();
-    let value = transaction
-        .pointer("/Execution/transitions/0/outputs/0/Private")
-        .unwrap()
-        .as_str()
-        .unwrap();
+
+    #[cfg(feature = "vmtropy_backend")]
+    let pointer_path = "/Execution/transitions/0/outputs/0/Private";
+    #[cfg(feature = "snarkvm_backend")]
+    let pointer_path = "/Execution/transitions/0/outputs/0/value";
+
+    let value = transaction.pointer(pointer_path).unwrap().as_str().unwrap();
 
     // check the output of the execution is the sum of the inputs
     assert_eq!("2u32", value);
@@ -88,11 +90,18 @@ fn program_validations() {
     // fail on unknown function
     let error =
         execute_program(home_path, &program_path, UNKNOWN_PROGRAM, &["1u32", "1u32"]).unwrap_err();
+
+    #[cfg(feature = "snarkvm_backend")]
+    assert!(error.contains("does not exist"));
+    #[cfg(feature = "vmtropy_backend")]
     assert!(error.contains("is not defined"));
 
     // fail on missing parameter
     let error = execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32"]).unwrap_err();
+    #[cfg(feature = "vmtropy_backend")]
     assert!(error.contains("not assigned in registers"));
+    #[cfg(feature = "snarkvm_backend")]
+    assert!(error.contains("expects 2 inputs"));
 }
 
 #[test]
