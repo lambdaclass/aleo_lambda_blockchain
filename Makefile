@@ -44,14 +44,50 @@ tendermint_config:
 # Initialize the tendermint configuration for a testnet of the given amount of validators
 testnet: VALIDATORS:=4
 testnet: ADDRESS:=192.167.10.2
+testnet: HOMEDIR:=testnet
 testnet: bin/tendermint cli
-	rm -rf testnet/
-	bin/tendermint testnet --v $(VALIDATORS) --o ./testnet --starting-ip-address $(ADDRESS)
-	for node in testnet/*/ ; do \
+	rm -rf $(HOMEDIR)/
+	bin/tendermint testnet --v $(VALIDATORS) --o ./$(HOMEDIR) --starting-ip-address $(ADDRESS)
+	for node in $(HOMEDIR)/*/ ; do \
 	  ALEO_HOME=$$node bin/aleo account new ; \
           make tendermint_config TENDERMINT_HOME=$$node ; \
 	done
-	cargo run --bin genesis --release -- testnet/*
+	cargo run --bin genesis --release -- $(HOMEDIR)/*
+
+# Initialize the tendermint configuration for a localnet of the given amount of validators
+localnet: VALIDATORS:=4
+localnet: ADDRESS:=127.0.0.1
+localnet: HOMEDIR:=localnet
+localnet: bin/tendermint cli
+	rm -rf $(HOMEDIR)/
+	bin/tendermint testnet --v $(VALIDATORS) --o ./$(HOMEDIR) --starting-ip-address $(ADDRESS)
+	for n in $$(seq 0 $$(($(VALIDATORS)-1))) ; do \
+	    ALEO_HOME=$(HOMEDIR)/node$$n bin/aleo account new ; \
+        make localnet_config TENDERMINT_HOME=$(HOMEDIR)/node$$n NODE=$$n VALIDATORS=$(VALIDATORS); \
+		mkdir $(HOMEDIR)/node$$n/abci ; \
+	done
+	cargo run --bin genesis --release -- $(HOMEDIR)/*
+.PHONY: localnet
+
+localnet_config:
+	sed -i.bak 's/max_body_bytes = 1000000/max_body_bytes = 12000000/g' $(TENDERMINT_HOME)/config/config.toml
+	sed -i.bak 's/max_tx_bytes = 1048576/max_tx_bytes = 10485770/g' $(TENDERMINT_HOME)/config/config.toml
+	for n in $$(seq 0 $$(($(VALIDATORS)-1))) ; do \
+	    eval "sed -i.bak 's/127.0.0.$$(($${n}+1)):26656/127.0.0.1:26$${n}56/g' $(TENDERMINT_HOME)/config/config.toml" ;\
+	done
+	sed -i.bak 's#laddr = "tcp://0.0.0.0:26656"#laddr = "tcp://0.0.0.0:26$(NODE)56"#g' $(TENDERMINT_HOME)/config/config.toml
+	sed -i.bak 's#laddr = "tcp://127.0.0.1:26657"#laddr = "tcp://0.0.0.0:26$(NODE)57"#g' $(TENDERMINT_HOME)/config/config.toml
+	sed -i.bak 's#proxy_app = "tcp://127.0.0.1:26658"#proxy_app = "tcp://127.0.0.1:26$(NODE)58"#g' $(TENDERMINT_HOME)/config/config.toml
+.PHONY: localnet_config
+
+# run both the abci application and the tendermint node
+# assumes config for each node has been done previously
+localnet_start: NODE:=0
+localnet_start: HOMEDIR:=localnet
+localnet_start:
+	bin/tendermint node --home ./$(HOMEDIR)/node$(NODE) --consensus.create_empty_blocks_interval="90s" &
+	cd ./$(HOMEDIR)/node$(NODE)/abci; cargo run --release --bin snarkvm_abci -- --port 26$(NODE)58
+.PHONY: localnet_start
 
 # remove the blockchain data
 reset: bin/tendermint
@@ -68,23 +104,26 @@ abci:
 test:
 	RUST_BACKTRACE=full cargo test --release -- --nocapture --test-threads=4
 
-localnet-build-abci:
+dockernet-build-abci:
 	docker build -t snarkvm_abci .
-.PHONY: localnet-build-abci
+.PHONY: dockernet-build-abci
 
 # Run a 4-node testnet locally
-localnet-start: localnet-stop testnet
+dockernet-start: HOMEDIR:=dockernet
+dockernet-start: dockernet-stop 
+	make testnet HOMEDIR=$(HOMEDIR)
 	make tendermint_install OS=linux ARCH=amd64
-	mv tendermint-install/tendermint testnet/ && rm -rf tendermint-install
+	mv tendermint-install/tendermint $(HOMEDIR)/ && rm -rf tendermint-install
 	docker-compose up
-.PHONY: localnet-start
+.PHONY: dockernet-start
 
 # Stop testnet
-localnet-stop:
+dockernet-stop:
 	docker-compose down
-.PHONY: localnet-stop
+.PHONY: dockernet-stop
 
 # Reset the testnet data
-localnet-reset:
-	rm -Rf testnet
-.PHONY: localnet-reset
+dockernet-reset: HOMEDIR:=dockernet
+dockernet-reset:
+	rm -Rf $(HOMEDIR)
+.PHONY: dockernet-reset

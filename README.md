@@ -19,7 +19,8 @@ The consensus/blockchain engine has been built with [Tendermint Core](https://do
     - [Setting the blockchain endpoint](#setting-the-blockchain-endpoint)
     - [See available CLI parameters](#see-available-cli-parameters)
     - [Execute without changing the state of the blockchain](#execute-without-changing-the-state-of-the-blockchain)
-    - [Running multiple nodes with Docker Compose](#running-multiple-nodes-with-Docker-Compose)
+    - [Running multiple nodes on local machine](#running-multiple-nodes-on-local-machine)
+    - [Running multiple nodes with Docker Compose](#running-multiple-nodes-with-docker-compose)
   - [Running tests](#running-tests)
   - [Working with records](#working-with-records)
   - [Initialize validators](#initialize-validators)
@@ -197,6 +198,45 @@ In order to see all different commands and parameters that the CLI can take, you
 
 You can execute programs in the way as you normally would but without sending the proofs to the blockchain by using the `--dry-run` parameter: `program execute aleo/hello.aleo 1u64 1u64 --dry-run`. This will display the same output as normal, and will also attempt to decrypt output records with the active credentials.
 
+### Running multiple nodes on local machine
+
+There is a set of *make commands* to create the configuration of a local testnet (localnet) of several nodes.
+
+```
+make localnet VALIDATORS={N}
+```
+
+Will create one specific directory for the configuration of N (default 4, max 10) nodes under directory `localnet`
+
+For each node it will create `config` and `data` directories to support tendermint function, and an `abci` directory to allow each `snarkvm_abci` instance run in its own directory.
+
+For each node it will assign a different set of ports for the tendermint and abci processes: For node N, the used ports will be 26{N}56, 26{N}57 and 26{n}58. Eg. for node 0 the ports will be 26056, 26057 and 26058.
+
+The `make localnet` command will create the specific configuration for each node including the updated persistent_peers so they see each other once run.
+
+It also will delete any previous configuration, so it can be used to reset the localnet as well.
+
+To start each node run in different terminals:
+```
+make localnet_start NODE={N}
+```
+
+This will start the `tendermint` process as well as the `snarkvm_abci` process in the same terminal (So logs can be a bit messy)
+
+Once all the nodes are started the network will be ready to interact.
+
+Note that each node will require more than 2Gb to run so it can get a bit eager on memory. Also note that 3 nodes is the minimum for tendermint to work, so 4 is the minimum to let it work and tolerate one validator failing.
+
+Thus, you can interact with the network from another terminal like this:
+
+```
+ALEO_HOME=localnet/node1/ bin/aleo --url http://127.0.0.1:26157 account balance
+```
+
+making sure the port matches the node being hit.
+
+To stop the localnet, `Ctrl+C` on each node terminal should end both the `abci` and the `tendermint` processes, but in case something doesn't go as expected, `ps aux | grep tendermint` and `ps aux | grep abci` will allow locate and kill any remaining process.
+
 ### Running multiple nodes with Docker Compose
 
 This requires having docker (with docker-compose) installed.
@@ -233,9 +273,46 @@ Thus, you can interact with the network from the host like this:
 ALEO_HOME=testnet/node1/ bin/aleo --url http://127.0.0.1:26657 account balance
 ```
 
+*Note: Currently, localnet commands described in previous section are preferred instead of docker counterparts, as have been tested recently. However we leave this section just in case docker is required of preferred.*
+
+This requires having docker (with docker-compose) installed.
+
+Then build the `snarkvm_abci` image:
+
+```
+make dockernet-build-abci
+```
+
+And to start the test net run:
+
+```
+make dockernet-start
+```
+
+Note that each node will require more than 2Gb to run so docker should be configured to use 10Gb or more in order to work with the default 4 nodes.
+
+To modify the configuration you should edit `docker-compose.yml` file
+
+The configuration mounts some volumes in the `dockernet/node{_}/` directories, and in case the tendermint nodes state needs to be reset, just run:
+
+```
+make dockernet-reset
+```
+
+or delete all the `node{_}` dirs to remove local `snarkvm_abci` data (it will require to download all the parameters on next run).
+
+You will find an `account.json` file in each `dockernet/node{_}/` directory, with the aleo credentials of the validators (usable to run commands with the credits of the validators). On a MacOS docker deploy, each of the 4 testnet nodes will be exposed on ports 26657, 26660, 26663, 26666 of localhost.
+
+Thus, you can interact with the network from the host like this:
+
+```
+ALEO_HOME=dockernet/node1/ bin/aleo --url http://127.0.0.1:26657 account balance
+```
+
 ## Running tests
 
 In order to run tests, make sure the ABCI and the Tendermint Node are currently (`make abci` and `make node` respectively) running locally, and run `make test`.
+
 
 ## Working with records
 
@@ -295,7 +372,6 @@ make VALIDATORS=3 testnet
 ````
 
 This will create subdirectories in `/mytestnet/` for each of the validators (defaults to 4 if it's not passed as a parameter). This means that there are files for the private validator keys, account info and genesis state. This way the nodes are able to translate a tendermint validator address to an aleo account, which in turn are used to generate reward records.
-
 
 ## Design
 
