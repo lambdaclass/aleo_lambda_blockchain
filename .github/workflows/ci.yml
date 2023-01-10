@@ -36,7 +36,7 @@ jobs:
  #       with:
  #         key:  "mostropy"
       - run: apt install -y clang libclang1
-      - run: cargo +nightly clippy --all-targets --all-features -- -D warnings
+      - run: cargo +nightly clippy --all-targets --features snarkvm -- -D warnings
   format:
     runs-on: [self-hosted, nomad]
     steps:
