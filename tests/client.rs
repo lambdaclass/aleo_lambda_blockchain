@@ -501,14 +501,6 @@ fn staking() {
         .unwrap()
         .to_string();
 
-    let validator_record = client_command(&validator_home, &["account", "records"])
-        .unwrap()
-        .pointer("/0/ciphertext")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string();
-
     // try to stake more than available, fail
     let error = client_command(
         receiver_home,
@@ -540,6 +532,14 @@ fn staking() {
     )
     .unwrap_err();
     assert!(error.contains("attempted to apply a staking update on a different aleo account"));
+
+    let validator_record = client_command(&validator_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // stake some credits from the validator account
     let transaction = client_command(
