@@ -117,7 +117,7 @@ impl ProgramStore {
     fn load_credits(&self) -> Result<()> {
         let (credits_program, keys) = lib::load_credits();
 
-        if self.exists(&credits_program.id()) {
+        if self.exists(credits_program.id()) {
             debug!("Credits program already exists in program store");
             Ok(())
         } else {
@@ -130,7 +130,7 @@ impl ProgramStore {
                 .collect();
 
             self.add(
-                &credits_program.id(),
+                credits_program.id(),
                 &credits_program,
                 &VerifyingKeyMap { map: key_map },
             )?;
@@ -171,12 +171,12 @@ mod tests {
         let program =
             Program::from_str(fs::read_to_string(program_path).unwrap().as_str()).unwrap();
 
-        let get_program = store.get(&program.id());
+        let get_program = store.get(program.id());
 
         assert!(get_program.unwrap().is_none());
 
         let storage_attempt = store_program(&store, "/aleo/hello.aleo");
-        assert!(storage_attempt.is_ok() && store.exists(&storage_attempt.unwrap().id()));
+        assert!(storage_attempt.is_ok() && store.exists(storage_attempt.unwrap().id()));
 
         // FIXME patching rocksdb weird behavior
         std::mem::forget(store);
@@ -193,7 +193,7 @@ mod tests {
         }
         let store = ProgramStore::new(&db_path("credits")).unwrap();
 
-        assert!(store.exists(&program.id()));
+        assert!(store.exists(program.id()));
     }
 
     fn store_program(program_store: &ProgramStore, path: &str) -> Result<vm::Program> {
@@ -210,7 +210,7 @@ mod tests {
             .map(|(i, (_, verifying_key))| (i, verifying_key))
             .collect();
 
-        program_store.add(&program.id(), &program, &VerifyingKeyMap { map: keys })?;
+        program_store.add(program.id(), &program, &VerifyingKeyMap { map: keys })?;
 
         Ok(program)
     }

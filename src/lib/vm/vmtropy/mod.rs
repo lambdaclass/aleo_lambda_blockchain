@@ -55,7 +55,7 @@ pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> 
             )
         }
         // Ensure the function name with the verifying key is correct.
-        if &candidate_name != &function.name() {
+        if candidate_name != function.name() {
             bail!(
                 "The verifier key is '{candidate_name}', but the function name is '{}'",
                 function.name()
@@ -221,7 +221,7 @@ pub fn execution(
 
     let transition = Transition {
         program_id: *program.id(),
-        function_name: function_name,
+        function_name,
         inputs: inputs.into_values().collect::<Vec<VariableType>>(),
         outputs: outputs.into_values().collect::<Vec<VariableType>>(),
         proof: encoded_proof,
@@ -257,12 +257,12 @@ pub fn mint_record(
     _record_name: &str,
     owner_view_key: &ViewKey,
     gates: u64,
-    _seed: u64,
+    seed: u64,
 ) -> Result<(Field, EncryptedRecord)> {
     // For now calling mint_credits is enough; on the snarkVM backend the program_id
     // and record_name are just used to calculate the commitment, but we don't do things that way
     // The seed is used for instantiating a randomizer, which is used to generate the nonce
     // and encrypt the record. Once again, we don't really do things that way for now.
 
-    mint_credits(owner_view_key, gates)
+    mint_credits(owner_view_key, gates, seed)
 }

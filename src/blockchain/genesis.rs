@@ -73,13 +73,23 @@ fn main() -> Result<()> {
 
         println!("Generating record for {aleo_address}");
         // NOTE: using a hardcoded seed, not for production!
-        let record = vm::mint_record(
+        #[allow(unused_mut)]
+        let mut record = vm::mint_record(
             "credits.aleo",
             "credits",
             &validator.aleo_view_key,
             cli.amount,
             1234,
         )?;
+
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "vmtropy_backend")] {
+                let mut prefixed_serialized_record = "record".to_owned();
+                let serialized = hex::encode(record.1.to_string().as_bytes());
+                prefixed_serialized_record.push_str(&serialized);
+                record.1.ciphertext = prefixed_serialized_record;
+            }
+        }
 
         genesis_records.push(record);
         validators.push(validator);

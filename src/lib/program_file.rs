@@ -15,7 +15,7 @@ pub struct ProgramFile {
 
 impl ProgramFile {
     pub fn build(program_source: &str) -> Result<Self> {
-        let (program, keys) = vm::build_program(&program_source)?;
+        let (program, keys) = vm::build_program(program_source)?;
 
         Ok(Self { program, keys })
     }

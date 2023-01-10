@@ -6,6 +6,7 @@ use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
 use lib::vm::{self, compute_serial_number};
+#[allow(unused_imports)]
 use lib::vm::{EncryptedRecord, ProgramID};
 use log::debug;
 use serde_json::json;
@@ -44,7 +45,10 @@ pub enum Credits {
         input_record: vm::UserInputValueType,
         #[clap(value_parser=parse_input_value)]
         recipient_address: vm::UserInputValueType,
+        #[cfg(feature = "snarkvm_backend")]
         #[clap(value_parser=parse_input_value)]
+        amount: u64,
+        #[cfg(feature = "vmtropy_backend")]
         amount: u64,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
@@ -448,11 +452,7 @@ async fn run_credits_command(
 fn parse_input_value(input: &str) -> Result<vm::UserInputValueType> {
     // try parsing an encrypted record string
     if input.starts_with("record") {
-        #[cfg(feature = "vmtropy_backend")]
-        return parse_input_record(&input[6..]);
-
-        #[cfg(feature = "snarkvm_backend")]
-        return parse_input_record(&input);
+        return parse_input_record(input);
     }
 
     // %account is a syntactic sugar for current user address
@@ -467,12 +467,12 @@ fn parse_input_value(input: &str) -> Result<vm::UserInputValueType> {
         return Ok(vm::UserInputValueType::Record(record));
     }
     // otherwise fallback to parsing a snarkvm literal
-    vm::UserInputValueType::from_str(&input.to_string())
+    vm::UserInputValueType::from_str(input)
 }
 
 pub fn parse_input_record(input: &str) -> Result<vm::UserInputValueType> {
     #[cfg(feature = "vmtropy_backend")]
-    let encrypted_record = EncryptedRecord::try_from(&(hex::decode(input)?.to_vec()))?;
+    let encrypted_record = EncryptedRecord::try_from(&(hex::decode(&input[6..])?.to_vec()))?;
 
     #[cfg(feature = "snarkvm_backend")]
     let encrypted_record = vm::EncryptedRecord::from_str(input)?;
@@ -484,7 +484,7 @@ pub fn parse_input_record(input: &str) -> Result<vm::UserInputValueType> {
 }
 
 /// Retrieves all records from the blockchain, and only those that are correctly decrypted
-/// (i.e, are owned by the passed credentials) and have not been spent are returned
+/// (i.e, are owned by the ssed credentials) and have not been spent are returned
 async fn get_records(
     credentials: &account::Credentials,
     url: &str,
@@ -498,6 +498,7 @@ async fn get_records(
     let spent_records: HashSet<vm::Field> = bincode::deserialize(&get_spent_records_response)?;
 
     debug!("Records: {:?}", records);
+    #[allow(clippy::clone_on_copy)]
     let records = records
         .into_iter()
         .filter_map(|(commitment, ciphertext)| {
@@ -505,7 +506,7 @@ async fn get_records(
                 .decrypt(&credentials.view_key)
                 .map(|decrypted_record| (commitment.clone(), ciphertext, decrypted_record))
                 .ok()
-                .filter(|(_, ciphertext, _decrypted_record)| {
+                .filter(|(_, _ciphertext, _decrypted_record)| {
                     let serial_number = compute_serial_number(credentials.private_key, commitment);
                     #[cfg(feature = "snarkvm_backend")]
                     return serial_number.is_ok()
@@ -513,7 +514,7 @@ async fn get_records(
                     #[cfg(feature = "vmtropy_backend")]
                     return serial_number.is_ok()
                         && !spent_records.contains(&serial_number.unwrap())
-                        && ciphertext.is_owner(&credentials.address, &credentials.view_key);
+                        && _ciphertext.is_owner(&credentials.address, &credentials.view_key);
                 })
         })
         .collect();

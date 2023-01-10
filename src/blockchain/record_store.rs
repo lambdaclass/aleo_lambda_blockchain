@@ -274,7 +274,9 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 mod tests {
     use std::fs;
 
+    #[allow(unused_imports)]
     use indexmap::IndexMap;
+    #[allow(unused_imports)]
     use lib::vm::{compute_serial_number, PrivateKey, Record, ViewKey};
     type PublicRecord = lib::vm::Record;
 
@@ -320,6 +322,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn no_double_add_record() {
         let store = RecordStore::new(&db_path("records2")).unwrap();
 

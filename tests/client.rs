@@ -96,7 +96,6 @@ fn program_validations() {
 }
 
 #[test]
-#[ignore = "Literal operands are not yet supported in VMtropy"]
 fn decrypt_records() {
     let (_acc_file, home_path, credentials) = &new_account();
     let (_program_file, program_path, _) = load_program(TOKEN_PROGRAM);
@@ -122,9 +121,21 @@ fn decrypt_records() {
     let transaction = retry_command(home_path, &["get", transaction_id, "-d"]).unwrap();
     let (owner, gates, amount) = get_decrypted_record(&transaction);
 
-    assert_eq!(amount.to_string(), "1u64.private");
-    assert_eq!(gates.to_string(), "0u64.private");
-    assert_eq!(owner.to_string(), format!("{address}.private"));
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "vmtropy_backend")] {
+            let expected_amount = "1u64";
+            let expected_gates = "0u64";
+            let expected_owner = format!("{address}");
+        } else if #[cfg(feature = "snarkvm_backend")] {
+            let expected_amount = "1u64.private";
+            let expected_gates = "0u64.private";
+            let expected_owner =  format!("{address}.private");
+        }
+    }
+
+    assert_eq!(amount.to_string(), expected_amount);
+    assert_eq!(gates.to_string(), expected_gates);
+    assert_eq!(owner.to_string(), expected_owner);
 
     // dry run contains decrypted records
     let output = execute_program(
@@ -156,11 +167,10 @@ fn decrypt_records() {
 }
 
 #[test]
-#[ignore = "DeserializeAny is not supported by bincode"]
 fn token_transaction() {
     // Create two accounts: Alice and Bob
     let (_tempfile_alice, alice_home, alice_credentials) = &new_account();
-    let (_tempfile_bob, bob_home, bob_credentials) = &new_account();
+    let (_tempfile_bob, _bob_home, bob_credentials) = &new_account();
 
     // Load token program with Alice credentials
     let (_program_file, program_path, _) = load_program("token");
@@ -198,25 +208,57 @@ fn token_transaction() {
     let transaction = retry_command(alice_home, &["get", transfer_transaction_id, "-d"]).unwrap();
     let (owner, _gates, amount) = get_decrypted_record(&transaction);
 
-    assert_eq!(
-        owner,
-        format!("{}.private", alice_credentials.get("address").unwrap())
-    );
-    assert_eq!(amount, "5u64.private");
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "vmtropy_backend")] {
+            assert_eq!(
+                owner,
+                format!("{}", alice_credentials.get("address").unwrap())
+            );
+            assert_eq!(amount, "5u64");
+        } else if #[cfg(feature = "snarkvm_backend")] {
+            assert_eq!(
+                owner,
+                format!("{}.private", alice_credentials.get("address").unwrap())
+            );
+            assert_eq!(amount, "5u64.private");
+        } else {
+            compile_error!("You must use a backend");
+        }
+    }
 
-    // Get, decrypt and assert correctness of Bob output record: Should have 5u64.private in the amount variable
-    let transaction = retry_command(bob_home, &["get", transfer_transaction_id, "-d"]).unwrap();
-    let (owner, _gates, amount) = get_decrypted_record(&transaction);
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "vmtropy_backend")] {
+            // Bob is not able to decrypt his records atm because his records
+            // are being encrypted with Alice's view key.
+            // The difference here between this and snarkVM's is that in snarkVM
+            // encryption is asymmetric and records could be encrypted using
+            // the address. In VMtropy records are encrypted using only the
+            // view key.
 
-    assert_eq!(
-        owner,
-        format!("{}.private", bob_credentials.get("address").unwrap())
-    );
-    assert_eq!(amount, "5u64.private");
+            // // Get, decrypt and assert correctness of Bob output record: Should have 5u64.private in the amount variable
+            // let transaction = retry_command(_bob_home, &["get", transfer_transaction_id, "-d"]).unwrap();
+            // let (owner, _gates, amount) = get_decrypted_record(&transaction);
+            // assert_eq!(
+            //     owner,
+            //     format!("{}", bob_credentials.get("address").unwrap())
+            // );
+            // assert_eq!(amount, "5u64");
+        } else if #[cfg(feature = "snarkvm_backend")] {
+            // Get, decrypt and assert correctness of Bob output record: Should have 5u64.private in the amount variable
+            let transaction = retry_command(_bob_home, &["get", transfer_transaction_id, "-d"]).unwrap();
+            let (owner, _gates, amount) = get_decrypted_record(&transaction);
+            assert_eq!(
+                owner,
+                format!("{}.private", bob_credentials.get("address").unwrap())
+            );
+            assert_eq!(amount, "5u64.private");
+        } else {
+            compile_error!("You must use a backend");
+        }
+    }
 }
 
 #[test]
-#[ignore = "Literal operands are not yet supported in VMtropy"]
 fn consume_records() {
     // new account41
     let (_acc_file, home_path, _) = &new_account();
@@ -309,11 +351,24 @@ fn validate_credits() {
 }
 
 #[test]
-#[ignore = "Check with consensus team"]
+// TODO: Remove this feature flag when we fix encryption on the VMtropy side
+#[cfg(feature = "snarkvm_backend")]
 fn transfer_credits() {
     let validator_home = validator_account_path();
 
     // assuming the first record has more than 10 credits
+    #[cfg(feature = "vmtropy_backend")]
+    let record = client_command(&validator_home, &["account", "records"])
+        .unwrap()
+        .pointer("/1/ciphertext")
+        .unwrap()
+        .get("ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    #[cfg(feature = "snarkvm_backend")]
     let record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
@@ -342,7 +397,8 @@ fn transfer_credits() {
 }
 
 #[test]
-#[ignore = "Check with consensus team"]
+// TODO: Remove this feature flag when we properly implement encryption on the VMtropy side
+#[cfg(feature = "snarkvm_backend")]
 fn transaction_fees() {
     // create a test account
     let (_tempfile, receiver_home, credentials) = &new_account();
@@ -358,9 +414,22 @@ fn transaction_fees() {
 
     // transfer a known amount of credits to the test account
     let validator_home = validator_account_path();
+
+    #[cfg(feature = "snarkvm_backend")]
     let record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/1/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    #[cfg(feature = "vmtropy_backend")]
+    let record = client_command(&validator_home, &["account", "records"])
+        .unwrap()
+        .pointer("/1/ciphertext")
+        .unwrap()
+        .get("ciphertext")
         .unwrap()
         .as_str()
         .unwrap()
@@ -489,7 +558,8 @@ fn transaction_fees() {
 }
 
 #[test]
-#[ignore = "Check with consensus team"]
+// TODO: Fix this when we properly implement encryption on the VMtropy side
+#[cfg(feature = "snarkvm_backend")]
 fn staking() {
     // create a test account
     let (_tempfile, receiver_home, credentials) = &new_account();
@@ -497,9 +567,21 @@ fn staking() {
     // transfer a known amount of credits to the test account
     let validator_home = validator_account_path();
     let tendermint_validator = validator_address(&validator_home);
+    #[cfg(feature = "snarkvm_backend")]
     let record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/2/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    #[cfg(feature = "vmtropy_backend")]
+    let record = client_command(&validator_home, &["account", "records"])
+        .unwrap()
+        .pointer("/2/ciphertext")
+        .unwrap()
+        .get("ciphertext")
         .unwrap()
         .as_str()
         .unwrap()
