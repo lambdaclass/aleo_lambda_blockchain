@@ -13,7 +13,7 @@ The consensus/blockchain engine has been built with [Tendermint Core](https://do
 - [Aleo-Lambda Blockchain](#aleo-lambda-blockchain)
   - [Project structure](#project-structure)
   - [Example application usage](#example-application-usage)
-    - [Sending programs and executions to the blockchain](#sending-deploys-and-executions-to-the-blockchain)
+    - [Sending programs and executions to the blockchain](#sending-programs-and-executions-to-the-blockchain)
   - [Other features](#other-features)
     - [Debugging the client/ABCI](#debugging-the-clientabci)
     - [Setting the blockchain endpoint](#setting-the-blockchain-endpoint)
@@ -24,6 +24,7 @@ The consensus/blockchain engine has been built with [Tendermint Core](https://do
   - [Running tests](#running-tests)
   - [Working with records](#working-with-records)
   - [Initialize validators](#initialize-validators)
+  - [Adding a node to the network](#adding-a-node-to-the-network)
   - [Design](#design)
     - [Credits and Incentives](#credits-and-incentives)
   - [Implementation notes](#implementation-notes)
@@ -198,46 +199,48 @@ In order to see all different commands and parameters that the CLI can take, you
 
 You can execute programs in the way as you normally would but without sending the proofs to the blockchain by using the `--dry-run` parameter: `program execute aleo/hello.aleo 1u64 1u64 --dry-run`. This will display the same output as normal, and will also attempt to decrypt output records with the active credentials.
 
-### Running multiple nodes on local machine
+### Running multiple nodes on local machine	
 
-There is a set of *make commands* to create the configuration of a local testnet (localnet) of several nodes.
+There is a set of *make commands* to create the configuration of a local testnet (localnet) of several nodes.	
 
-```
-make localnet VALIDATORS={N}
-```
+```	
+make localnet VALIDATORS={N}	
+```	
 
-Will create one specific directory for the configuration of N (default 4, max 10) nodes under directory `localnet`
+Will create one specific directory for the configuration of N (default 4, max 10) nodes under directory `localnet`	
 
-For each node it will create `config` and `data` directories to support tendermint function, and an `abci` directory to allow each `snarkvm_abci` instance run in its own directory.
+For each node it will create `config` and `data` directories to support tendermint function, and an `abci` directory to allow each `snarkvm_abci` instance run in its own directory.	
 
-For each node it will assign a different set of ports for the tendermint and abci processes: For node N, the used ports will be 26{N}56, 26{N}57 and 26{n}58. Eg. for node 0 the ports will be 26056, 26057 and 26058.
+For each node it will assign a different set of ports for the tendermint and abci processes: For node N, the used ports will be 26{N}56, 26{N}57 and 26{n}58. Eg. for node 0 the ports will be 26056, 26057 and 26058.	
 
-The `make localnet` command will create the specific configuration for each node including the updated persistent_peers so they see each other once run.
+The `make localnet` command will create the specific configuration for each node including the updated persistent_peers so they see each other once run.	
 
-It also will delete any previous configuration, so it can be used to reset the localnet as well.
+It also will delete any previous configuration, so it can be used to reset the localnet as well.	
 
-To start each node run in different terminals:
-```
-make localnet_start NODE={N}
-```
+To start each node run in different terminals:	
+```	
+make localnet_start NODE={N}	
+```	
 
-This will start the `tendermint` process as well as the `snarkvm_abci` process in the same terminal (So logs can be a bit messy)
+This will start the `tendermint` process as well as the `snarkvm_abci` process in the same terminal (So logs can be a bit messy)	
 
-Once all the nodes are started the network will be ready to interact.
+Once all the nodes are started the network will be ready to interact.	
 
-Note that each node will require more than 2Gb to run so it can get a bit eager on memory. Also note that 3 nodes is the minimum for tendermint to work, so 4 is the minimum to let it work and tolerate one validator failing.
+Note that each node will require more than 2Gb to run so it can get a bit eager on memory. Also note that 3 nodes is the minimum for tendermint to work, so 4 is the minimum to let it work and tolerate one validator failing.	
 
-Thus, you can interact with the network from another terminal like this:
+Thus, you can interact with the network from another terminal like this:	
 
-```
-ALEO_HOME=localnet/node1/ bin/aleo --url http://127.0.0.1:26157 account balance
-```
+```	
+ALEO_HOME=localnet/node1/ bin/aleo --url http://127.0.0.1:26157 account balance	
+```	
 
-making sure the port matches the node being hit.
+making sure the port matches the node being hit.	
 
-To stop the localnet, `Ctrl+C` on each node terminal should end both the `abci` and the `tendermint` processes, but in case something doesn't go as expected, `ps aux | grep tendermint` and `ps aux | grep abci` will allow locate and kill any remaining process.
+To stop the localnet, `Ctrl+C` on each node terminal should end both the `abci` and the `tendermint` processes, but in case something doesn't go as expected, `ps aux | grep tendermint` and `ps aux | grep abci` will allow locate and kill any remaining process.	
 
 ### Running multiple nodes with Docker Compose
+
+*Note: Currently, localnet commands described in previous section are preferred instead of docker counterparts, as have been tested recently. However we leave this section just in case docker is required of preferred.*
 
 This requires having docker (with docker-compose) installed.
 
@@ -272,8 +275,6 @@ Thus, you can interact with the network from the host like this:
 ```shell
 ALEO_HOME=testnet/node1/ bin/aleo --url http://127.0.0.1:26657 account balance
 ```
-
-*Note: Currently, localnet commands described in previous section are preferred instead of docker counterparts, as have been tested recently. However we leave this section just in case docker is required of preferred.*
 
 This requires having docker (with docker-compose) installed.
 
@@ -312,7 +313,6 @@ ALEO_HOME=dockernet/node1/ bin/aleo --url http://127.0.0.1:26657 account balance
 ## Running tests
 
 In order to run tests, make sure the ABCI and the Tendermint Node are currently (`make abci` and `make node` respectively) running locally, and run `make test`.
-
 
 ## Working with records
 
@@ -372,6 +372,32 @@ make VALIDATORS=3 testnet
 ````
 
 This will create subdirectories in `/mytestnet/` for each of the validators (defaults to 4 if it's not passed as a parameter). This means that there are files for the private validator keys, account info and genesis state. This way the nodes are able to translate a tendermint validator address to an aleo account, which in turn are used to generate reward records.
+
+## Adding a node to the network
+
+Once a network is up and running, you can add new nodes. In general, nodes in the network can work in two different modes:
+
+- Non-validator: The node catches up with the blockchain by performing every transaction, but does not have voting power for validating and commiting blocks
+- Validator: The node is part of the network, and can vote and sign blocks
+
+Adding a non-validator node with Tendermint Core is simple: You need to provide the appropriate `genesis.json` file (you can copy it from the network nodes), and update the `persistent_peers` field in the `config.toml` file (by default on the `.tendermint` directory) to point to the fixed seeds (you can also get this from the one of the network's `config.toml`). 
+You can also just copy the whole file if every other setting such as sockets, timeouts, etc. are expected to be default. Once this is done, you can run `bin/tendermint node` to run the node code on one terminal and `make abci` on another to make sure the ABCI runs alongside Tendermint. If all is well configured, you should see the Tendermint node connecting to the ABCI, succesfully parsing the `genesis.json` and replaying the transactions that it gets from the `persistent_peers`. 
+If reading the logs from the remote logs, you will also see the new node's connection incoming. You can read more about the config on the [Tendermint docs](https://github.com/tendermint/tendermint/blob/release/v0.34.13/docs/tendermint-core/using-tendermint.md#adding-a-non-validator).
+
+In order to transform the node into validator, we need to give it voting power. This is implemented on our ABCI's [`EndBlock`] hook(https://github.com/tendermint/tendermint/blob/main/spec/abci/abci.md#endblock). 
+To update its voting power, you need to stake credits to its public key (an Ed25519 public key located in `.tendermint/config/priv_validator_key.json`), which means you need to transfer valid credits to the address associated with the new node (usually located in `/.tendermint` if the config was initialised with the make targets, but it can be any valid Aleo address). An example stake transaction looks like this:
+
+```shell
+ALEO_HOME="/Users/admin/.tendermint" bin/aleo credits stake 40 record1f2D... jDKxY+9XKM02u1jRQea4dV3UKjuZ4Pqfe3vtswkF0xE=
+```
+
+- Notice that we are setting ALEO_HOME so that the account located in that directory is performing the stake, but as mentioned, any valid Aleo address will work as long as it is the owner of the spent record
+- `record1f2D...` should be an unspent record's ciphertext associated to the address in the `.tendermint` directory
+- `jDKxY+9XKM02u1jRQea4dV3UKjuZ4Pqfe3vtswkF0xE=` is the public key associated with the Tendermint node
+
+This will associate the Tendermint public key to the Aleo address in all the blockchain nodes, so that they can appropriately assign credits to it in each round. You can read more about staking in the [staking section](#staking).
+
+Note that the code relies on voting power for a given round as informed by Tendermint as opposed to using the one that we track internally. This is because the voting power on the informed round may not be the same as the last known one (e.g. there could be staking changes already applied to our internal data structures that will take some rounds before affecting the consensus voting). For example, if you unstake all credits from an account, you will see the its balance increase for a couple of blocks after unstaking because the changes are not committed immediately by design.
 
 ## Design
 
