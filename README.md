@@ -4,7 +4,7 @@ This repository contains an implementation of the Aleo verifiable computing mode
 
 The current implementation allows for two different VM backends to compile and compute Aleo programs: 
 - Our [fork of Aleo's SnarkVM](https://github.com/lambdaclass/snarkVM).
-- A [VM implementation](https://github.com/lambdaclass/VMtropy) built from scratch.
+- Our own Aleo [VM implementation](https://github.com/lambdaclass/aleo_vm_lambda) built from scratch.
 
 The consensus/blockchain engine has been built with [Tendermint Core](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html).
 
