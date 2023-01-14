@@ -1,6 +1,6 @@
-# Aleo-Lambda Blockchain
+# Aleo Lambda Blockchain
 
-This repository contains an implementation of the Aleo verifiable computing model built by [LambdaClass](https://github.com/lambdaclass). Users can run arbitrary private programs off-chain, generate proofs and send them over to a blockchain for transaction storage. 
+This repository contains a Tendermint implementation of the Aleo verifiable computing model built by [LambdaClass](https://github.com/lambdaclass). Users can run arbitrary private programs off-chain, generate proofs and send them over to a blockchain for transaction storage. 
 
 The current implementation allows for two different VM backends to compile and compute Aleo programs: 
 - Our [fork of Aleo's SnarkVM](https://github.com/lambdaclass/snarkVM).
