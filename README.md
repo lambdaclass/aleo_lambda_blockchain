@@ -4,13 +4,14 @@ This repository contains an implementation of the Aleo verifiable computing mode
 
 The current implementation allows for two different VM backends to compile and compute Aleo programs: 
 - Our [fork of Aleo's SnarkVM](https://github.com/lambdaclass/snarkVM).
-- A [VM implementation](https://github.com/lambdaclass/VMtropy) built from scratch.
+- A [VM implementation](https://github.com/lambdaclass/aleo_vm_lambda) built from scratch.
 
 The consensus/blockchain engine has been built with [Tendermint Core](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html).
 
 ## Table of Contents  
 
 - [Aleo-Lambda Blockchain](#aleo-lambda-blockchain)
+  - [Table of Contents](#table-of-contents)
   - [Project structure](#project-structure)
   - [Example application usage](#example-application-usage)
     - [Sending programs and executions to the blockchain](#sending-programs-and-executions-to-the-blockchain)
@@ -20,13 +21,18 @@ The consensus/blockchain engine has been built with [Tendermint Core](https://do
     - [See available CLI parameters](#see-available-cli-parameters)
     - [Execute without changing the state of the blockchain](#execute-without-changing-the-state-of-the-blockchain)
     - [Running multiple nodes on local machine](#running-multiple-nodes-on-local-machine)
-    - [Running multiple nodes with Docker Compose](#running-multiple-nodes-with-docker-compose)
   - [Running tests](#running-tests)
   - [Working with records](#working-with-records)
   - [Initialize validators](#initialize-validators)
   - [Adding a node to the network](#adding-a-node-to-the-network)
   - [Design](#design)
     - [Credits and Incentives](#credits-and-incentives)
+      - [Credits](#credits)
+      - [Fees](#fees)
+      - [Rewards](#rewards)
+      - [Staking](#staking)
+      - [Genesis block](#genesis-block)
+      - [Slashing](#slashing)
   - [Implementation notes](#implementation-notes)
     - [Record commitments, serial numbers and validations](#record-commitments-serial-numbers-and-validations)
     - [Other assumptions and known issues](#other-assumptions-and-known-issues)
@@ -384,7 +390,7 @@ Adding a non-validator node with Tendermint Core is simple: You need to provide 
 You can also just copy the whole file if every other setting such as sockets, timeouts, etc. are expected to be default. Once this is done, you can run `bin/tendermint node` to run the node code on one terminal and `make abci` on another to make sure the ABCI runs alongside Tendermint. If all is well configured, you should see the Tendermint node connecting to the ABCI, succesfully parsing the `genesis.json` and replaying the transactions that it gets from the `persistent_peers`. 
 If reading the logs from the remote logs, you will also see the new node's connection incoming. You can read more about the config on the [Tendermint docs](https://github.com/tendermint/tendermint/blob/release/v0.34.13/docs/tendermint-core/using-tendermint.md#adding-a-non-validator).
 
-In order to transform the node into validator, we need to give it voting power. This is implemented on our ABCI's [`EndBlock`] hook(https://github.com/tendermint/tendermint/blob/main/spec/abci/abci.md#endblock). 
+In order to transform the node into validator, we need to give it voting power. This is implemented on our ABCI's [`EndBlock` hook](https://github.com/tendermint/tendermint/blob/main/spec/abci/abci.md#endblock). 
 To update its voting power, you need to stake credits to its public key (an Ed25519 public key located in `.tendermint/config/priv_validator_key.json`), which means you need to transfer valid credits to the address associated with the new node (usually located in `/.tendermint` if the config was initialised with the make targets, but it can be any valid Aleo address). An example stake transaction looks like this:
 
 ```shell
@@ -411,11 +417,11 @@ The diagram below describes the current architecture of the system:
 * The application is isolated from the outer world and communicates exclusively with the tendermint process through specific hooks of the Application Blockchain Interface (ABCI). For example: the `CheckTx` hook is used to validate transactions before putting them in the local mempool and relaying them to the peers, the `DeliverTx` writes application state changes derived from transactions included in a block and the `Commit` hook applies those changes when the block is committed to the ledger.
 * The ABCI application contains two components related to maintaining the state of the blockchain network: The program store and the record store. As their names imply, they are in charge of persisting and retrieveing programs that have been committed by users and keeping track of records and their spending status respectively.
 
-These interactions between tendermint core and the application are depicted below:
+These interactions between Tendermint Core and the application are depicted below:
 
 <img src="doc/abci.png" width="640">
 
-For a diagram of the the consensus protocol check the [tendermint documentation](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview).
+For a diagram of the the consensus protocol check the [Tendermint documentation](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html#abci-overview).
 
 Below are sequence diagrams of deployment and execution transactions.
 
@@ -425,7 +431,7 @@ This project intended to implement _the simplest thing that could possibly work_
 #### Credits
 As in SnarkVM and, by extension, SnarkOS, this project relies on a special `credits.aleo` program to handle all operations with the official aleo currency. While this program has special treatment, in this case it differs from SnarkVM in that its sourcecode is not embedded in the vm library nor its keys downloaded remotely. The file is assumed to be [available locally](./aleo/credits.aleo) when compiling the code and it can be modified as the rest of the codebase. It's assumed that the client and the ABCI application will have been compiled with the same version of the credits source code.
 
-The credits program defines a [credits record](https://github.com/lambdaclass/aleo-consensus/blob/7cbaea3d43589804c34e1b7dce9a1b13025ce09a/aleo/credits.aleo#L3-L5), which has an owner address and the amount of `gates` the record contains. The gates are the currency in aleo programs. The program also exposes a few functions related to credits management, e.g. to transfer gates, combine or split records and to pay fees for transactions (see below). Those functions are, in turn, [exposed as subcommands](https://github.com/lambdaclass/aleo-consensus/blob/7cbaea3d43589804c34e1b7dce9a1b13025ce09a/src/client/commands.rs#L38-L118) in this project's CLI.
+The credits program defines a [credits record](https://github.com/lambdaclass/aleo-consensus/blob/7cbaea3d43589804c34e1b7dce9a1b13025ce09a/aleo/credits.aleo#L3-L5), which has an owner address and the amount of `gates` the record contains. The gates are the currency in Aleo programs. The program also exposes a few functions related to credits management, e.g. to transfer gates, combine or split records and to pay fees for transactions (see below). Those functions are, in turn, [exposed as subcommands](https://github.com/lambdaclass/aleo-consensus/blob/7cbaea3d43589804c34e1b7dce9a1b13025ce09a/src/client/commands.rs#L38-L118) in this project's CLI.
 
 The source code for the credits program from this repository, compared with the one in SnarkVM, introduces a new record type and a couple of extra functions specific for staking of credits through a validator. These will be discussed below.
 
@@ -457,7 +463,7 @@ And an execution:
 
 Note that we if omit the `--fee-record` argument, the CLI program will try to figure one out from the unspent records in the current account.
 
-The fee also determines the priority of the transaction within the blockchain nodes mempools; higher paying transaction should ideally be processed first. This is controlled in the [ABCI application hooks](https://github.com/lambdaclass/aleo-consensus/blob/7cbaea3d43589804c34e1b7dce9a1b13025ce09a/src/blockchain/application.rs#L130-L133) but note that its support by tendermint is limited and subject to change in future versions. More details [here](https://github.com/tendermint/tendermint/discussions/9772).
+The fee also determines the priority of the transaction within the blockchain nodes mempools; higher paying transaction should ideally be processed first. This is controlled in the [ABCI application hooks](https://github.com/lambdaclass/aleo-consensus/blob/7cbaea3d43589804c34e1b7dce9a1b13025ce09a/src/blockchain/application.rs#L130-L133) but note that its support by Tendermint is limited and subject to change in future versions. More details [here](https://github.com/tendermint/tendermint/discussions/9772).
 
 #### Rewards
 In addition to the fees collected from transactions, there's a baseline amount of gates generated on each block.
@@ -468,24 +474,24 @@ The current algorithm gives roughly half to the current block proposer and distr
 weighted by their voting power (which, in turn, is proportional to their staked credits as explained in the next section). Since this weighted distribution
 may produce leftovers from rounding errors, those are assigned to the proposer to ensure no credits are lost.
 
-At the end of the block processing, the rewards are distributed by minting records of the credits program for each validator, setting the validator aleo address as the owner.
+At the end of the block processing, the rewards are distributed by minting records of the credits program for each validator, setting the validator Aleo address as the owner.
 Some notes about this process:
-* For this to be possible, a mapping between tendermint validator address and aleo account is tracked by the blockchain.
+* For this to be possible, a mapping between Tendermint validator address and Aleo account is tracked by the blockchain.
 * Because all nodes participating in consensus need to produce the same records on-chain, and because records require a random nonce to prevent hash collisions, for this particular case the nonces are generated deterministically from a known seed. This implementation uses the [block height as the seed](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/src/blockchain/validator_set.rs#L242).
-* These records will be added to the record store at the end of block processing (see the design section). Note that this is ABCI application state that, even though not stored in the tendermint blockchain directly, is derived deterministically from the transaction ledger.
-* Despite the records being shielded in the blockchain, there is some level of privacy leakage in the sense that anyone running an honest node can inspect which aleo account gets which amount of rewards. This is a necessary consequence of the consensus algorithm.
+* These records will be added to the record store at the end of block processing (see the design section). Note that this is ABCI application state that, even though not stored in the Tendermint blockchain directly, is derived deterministically from the transaction ledger.
+* Despite the records being shielded in the blockchain, there is some level of privacy leakage in the sense that anyone running an honest node can inspect which Aleo account gets which amount of rewards. This is a necessary consequence of the consensus algorithm.
 
 The relevant reward generation code can be found [here](https://github.com/lambdaclass/aleo-consensus/blob/HEAD/src/blockchain/validator_set.rs#L180-L253).
 
 #### Staking
-The validator nodes in the network have an associated voting power which determines their weight in the tendermint consensus protocol. Proof of Stake is implemented by exposing a mechanism to exchange aleo credits with voting power points, and informing those changes to the tendermint core layer through the ABCI interface.
+The validator nodes in the network have an associated voting power which determines their weight in the Tendermint consensus protocol. Proof of Stake is implemented by exposing a mechanism to exchange Aleo credits with voting power points, and informing those changes to the Tendermint core layer through the ABCI interface.
 
 A few changes have been introduced to the `credits.aleo` program to implement staking through program execution (with its associated proofs verified by the blockchain):
 
 * A new [staked_credits record type](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/aleo/credits.aleo#L7-L9), which is used as a way to "put credits aside" in exchange of voting power. (see [this task](https://trello.com/c/XszNFTYN/212-verify-that-credits-records-cant-be-used-interchangeably) to verify some assumptions around this decision).
-* A [stake function](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/aleo/credits.aleo#L50-L60) used to move an amount of aleo gates from a credits to a staked_credits record. In addition to generating output records, there are a number of public output values used by the nodes to update the validator state: the amount staked and the aleo account address doing the staking (the aleo address for the validator is necessary to know what owner to use for the reward records).
+* A [stake function](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/aleo/credits.aleo#L50-L60) used to move an amount of Aleo gates from a credits to a staked_credits record. In addition to generating output records, there are a number of public output values used by the nodes to update the validator state: the amount staked and the Aleo account address doing the staking (the Aleo address for the validator is necessary to know what owner to use for the reward records).
 * [An unstake function](https://github.com/lambdaclass/aleo-consensus/blob/4e4a5999ccf44c961f42161a268c5f8780f286f1/aleo/credits.aleo#L62-L72) used for the inverse operation: moving gates back from staked_credits to credits. It is worth noting that this unstake operation takes as an input one of the records that are created by the stake function.
-* In order to avoid unstaking credits from validators that were originally staked to different validators, the Public Key needs to be embedded in the `staked_credits` records. Because there is no specific data type that adjusts to this need, the tendermint validator Public Key is passed to aleo instructions through two `u128` literals. The key is both embedded in the records and also output as a public value for the blockchain to adjust voting power accordingly.
+* In order to avoid unstaking credits from validators that were originally staked to different validators, the Public Key needs to be embedded in the `staked_credits` records. Because there is no specific data type that adjusts to this need, the Tendermint validator Public Key is passed to aleo instructions through two `u128` literals. The key is both embedded in the records and also output as a public value for the blockchain to adjust voting power accordingly.
 
 
 The CLI, in turn, exposes a couple of commands to handle execution of those functions:
