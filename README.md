@@ -1,10 +1,10 @@
-# Aleo-Lambda Blockchain
+# Aleo Lambda Blockchain
 
-This repository contains an implementation of the Aleo verifiable computing model built by [LambdaClass](https://github.com/lambdaclass). Users can run arbitrary private programs off-chain, generate proofs and send them over to a blockchain for transaction storage. 
+This repository contains a Tendermint implementation of the Aleo verifiable computing model built by [LambdaClass](https://github.com/lambdaclass). Users can run arbitrary private programs off-chain, generate proofs and send them over to a blockchain for transaction storage. 
 
 The current implementation allows for two different VM backends to compile and compute Aleo programs: 
 - Our [fork of Aleo's SnarkVM](https://github.com/lambdaclass/snarkVM).
-- A [VM implementation](https://github.com/lambdaclass/aleo_vm_lambda) built from scratch.
+- Our own Aleo [VM implementation](https://github.com/lambdaclass/aleo_vm_lambda) built from scratch.
 
 The consensus/blockchain engine has been built with [Tendermint Core](https://docs.tendermint.com/v0.34/introduction/what-is-tendermint.html).
 
@@ -565,7 +565,7 @@ The proof of stake implementation works under the assumption that records are st
 This work is captured in [this ticket](https://trello.com/c/XszNFTYN/212-verify-that-credits-records-cant-be-used-interchangeably).
 
 ### Other assumptions and known issues
-* The [vm module](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/lib/vm/mod.rs#L253-L283) of this project contains most interactions with SnarkVM (and it's planned to similarly contain the analog operations from [VMentropy](https://github.com/lambdaclass/VMtropy)). Note that part of the API of the module are ad hoc function to meet specific requirements without having to change or dig too deep in SnarkVM. Parts of SnarkVM were ported or circumvented, so there may be some implicit cryptographic assumptions that are not being met.
+* The [vm module](https://github.com/lambdaclass/aleo-consensus/blob/c5792f44df0a74b4eb56afdb324610f062f03904/src/lib/vm/mod.rs#L253-L283) of this project contains most interactions with SnarkVM (and it's planned to similarly contain the analog operations from the [Aleo Lambda VM](https://github.com/lambdaclass/aleo_lambda_vm)). Note that part of the API of the module are ad hoc function to meet specific requirements without having to change or dig too deep in SnarkVM. Parts of SnarkVM were ported or circumvented, so there may be some implicit cryptographic assumptions that are not being met.
 * Transaction ids are generated as sha256 hashes of the transaction data, which allows integrity verification on the blockchain side. The use of merkle trees to generate the ids as previously done by SnarkVM was considered unnecessary for the purposes  this project.
 * The [thread rng](https://docs.rs/rand/0.5.0/rand/fn.thread_rng.html) is used in most places where SnarkVM interactions required random number generation. This may need to be revised for security.
 * SnarkVM generates certificates along with verifying and proving keys, intended to be used to verify deployment of new program verifying keys. This step was skipped in the current blockchain (no certificates are passed or verified). They could be added without much effort, though.
