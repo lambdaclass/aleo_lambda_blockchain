@@ -66,8 +66,9 @@ branch = "integration"
 optional = true
 
 [dependencies.snarkvm]
-git = "https://github.com/Lambdaclass/snarkvm"
+git = "https://github.com/lambdaclass/snarkVM.git"
 branch = "entropy_fork"
+features = ["circuit", "console", "parallel", "parameters"]
 optional = true
 
 [dev-dependencies]

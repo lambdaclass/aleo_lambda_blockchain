@@ -75,9 +75,8 @@ fn program_validations() {
 
     // fail on already deployed compiled locally
     let error = client_command(home_path, &["program", "deploy", &program_path]).unwrap_err();
-    assert!(error.contains(
-        "Error executing transaction 1: Could not verify transaction: Program already exists"
-    ));
+
+    assert!(error.contains("Internal error: tx already exists in cache"));
 
     // execute the program, retrieving it from the blockchain, using it's id
     execute_program(home_path, &program_id, "hello", &["1u32", "1u32"]).unwrap();
@@ -320,7 +319,7 @@ fn consume_records() {
 }
 
 #[test]
-fn validate_credits() {
+fn try_create_credits() {
     let (_tempfile, home_path, _) = &new_account();
 
     let credits_path = "aleo/credits.aleo";
@@ -346,8 +345,8 @@ fn validate_credits() {
     let output = execute_program(
         home_path,
         &program_path,
-        MINT_FUNCTION,
-        &["%account", "100u64"],
+        "mint_credits",
+        &["100u64", "%account"],
     )
     .err()
     .unwrap();
@@ -615,7 +614,7 @@ fn staking() {
 
     assert_balance(receiver_home, 50).unwrap();
 
-    let record = client_command(receiver_home, &["account", "records"])
+    let user_record = client_command(receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
         .unwrap()
@@ -626,7 +625,13 @@ fn staking() {
     // try to stake more than available, fail
     let error = client_command(
         receiver_home,
-        &["credits", "stake", "60", &record, &tendermint_validator],
+        &[
+            "credits",
+            "stake",
+            "60",
+            &user_record,
+            &tendermint_validator,
+        ],
     )
     .unwrap_err();
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
@@ -635,10 +640,38 @@ fn staking() {
 
     // TODO add check: try to stake for an unexistent validator, fail
 
-    // stake all available
-    let transaction = client_command(
+    // stake all available, but fail because this is not the expected aleo account
+    let error = client_command(
         receiver_home,
-        &["credits", "stake", "50", &record, &tendermint_validator],
+        &[
+            "credits",
+            "stake",
+            "50",
+            &user_record,
+            &tendermint_validator,
+        ],
+    )
+    .unwrap_err();
+    assert!(error.contains("attempted to apply a staking update on a different aleo account"));
+
+    let validator_record = client_command(&validator_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // stake some credits from the validator account
+    let transaction = client_command(
+        &validator_home,
+        &[
+            "credits",
+            "stake",
+            "5",
+            &validator_record,
+            &tendermint_validator,
+        ],
     )
     .unwrap();
 
@@ -650,14 +683,8 @@ fn staking() {
 
     // try to unstake more than available, fail
     let error = client_command(
-        receiver_home,
-        &[
-            "credits",
-            "unstake",
-            "60",
-            staked_credits_record,
-            &tendermint_validator,
-        ],
+        &validator_home,
+        &["credits", "unstake", "15", staked_credits_record],
     )
     .unwrap_err();
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
@@ -666,16 +693,12 @@ fn staking() {
 
     // unstake all available
     client_command(
-        receiver_home,
-        &[
-            "credits",
-            "unstake",
-            "50",
-            staked_credits_record,
-            &tendermint_validator,
-        ],
+        &validator_home,
+        &["credits", "unstake", "5", staked_credits_record],
     )
     .unwrap();
+
+    // TODO: Test to see if the validator_set file actually gets updated with staking updates
 }
 
 // HELPERS

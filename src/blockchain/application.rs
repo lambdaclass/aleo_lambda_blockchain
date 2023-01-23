@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::program_store::ProgramStore;
@@ -45,11 +46,7 @@ impl Application for SnarkVMApp {
                 .expect("failure adding genesis records");
         }
 
-        self.validators
-            .lock()
-            .unwrap()
-            .set_validators(state.validators);
-
+        self.validators.lock().unwrap().replace(state.validators);
         Default::default()
     }
 
@@ -173,7 +170,12 @@ impl Application for SnarkVMApp {
                 }
 
                 if let Some(validator) = vote_info.validator.clone() {
-                    Some((validator.address, validator.power as u64))
+                    if validator.power < 0 {
+                        error!("received negative validator vote");
+                        None
+                    } else {
+                        Some((validator.address, validator.power as u64))
+                    }
                 } else {
                     // If there's no associated validator data, we can't use this vote
                     None
@@ -181,7 +183,7 @@ impl Application for SnarkVMApp {
             })
             .collect();
 
-        self.validators.lock().unwrap().prepare(
+        self.validators.lock().unwrap().begin_block(
             &header.proposer_address,
             votes,
             header.height as u64,
@@ -207,7 +209,7 @@ impl Application for SnarkVMApp {
             .check_no_duplicate_records(&tx)
             .and_then(|_| self.check_inputs_are_unspent(&tx))
             .and_then(|_| self.validate_transaction(&tx))
-            .map(|_| self.validators.lock().unwrap().add(tx.fees() as u64))
+            .map(|_| self.update_validators(&tx))
             .and_then(|_| self.spend_input_records(&tx))
             .and_then(|_| self.add_output_records(&tx))
             .and_then(|_| self.store_program(&tx));
@@ -238,6 +240,26 @@ impl Application for SnarkVMApp {
         }
     }
 
+    /// Applies validator set updates based on staking transactions included in the block.
+    /// For details about validator set update semantics see:
+    /// https://github.com/tendermint/tendermint/blob/v0.34.x/spec/abci/apps.md#endblock
+    fn end_block(&self, _request: abci::RequestEndBlock) -> abci::ResponseEndBlock {
+        let validator_set = self.validators.lock().unwrap();
+        let validator_updates = validator_set
+            .pending_updates()
+            .iter()
+            .map(|validator| abci::ValidatorUpdate {
+                pub_key: Some(validator.pub_key.into()),
+                power: validator.voting_power as i64,
+            })
+            .collect();
+
+        abci::ResponseEndBlock {
+            validator_updates,
+            ..Default::default()
+        }
+    }
+
     /// This hook commits is called when the block is comitted (after deliver_tx has been called for each transaction).
     /// Changes to application should take effect here. Tendermint guarantees that no transaction is processed while this
     /// hook is running.
@@ -263,11 +285,15 @@ impl Application for SnarkVMApp {
 
         let height = HeightFile::increment();
 
-        for (commitment, record) in self.validators.lock().unwrap().rewards() {
+        let mut validators = self.validators.lock().unwrap();
+        for (commitment, record) in validators.block_rewards() {
             if let Err(err) = self.records.add(commitment, record) {
                 error!("Failed to add reward record to store {}", err);
             }
         }
+        validators
+            .commit()
+            .unwrap_or_else(|e| error!("failed to save validators: {e}"));
 
         info!("Committing height {}", height);
         abci::ResponseCommit {
@@ -280,11 +306,12 @@ impl Application for SnarkVMApp {
 impl SnarkVMApp {
     /// Constructor.
     pub fn new() -> Self {
+        let validators_path = Path::new("abci.validators");
         Self {
             // we rather crash than start with badly initialized stores
             programs: ProgramStore::new("programs").expect("could not create a program store"),
             records: RecordStore::new("records").expect("could not create a record store"),
-            validators: Arc::new(Mutex::new(ValidatorSet::new("abci.validators"))),
+            validators: Arc::new(Mutex::new(ValidatorSet::load_or_create(validators_path))),
         }
     }
 
@@ -339,7 +366,21 @@ impl SnarkVMApp {
             .unwrap_or(Ok(()))
     }
 
+    /// Apply validator set side-effects of the transaction: collecting fees and changing
+    /// the voting power based on staking transactions.
+    fn update_validators(&self, transaction: &Transaction) -> Result<()> {
+        let mut validator_set = self.validators.lock().unwrap();
+        validator_set.collect(transaction.fees() as u64);
+        transaction
+            .stake_updates()?
+            .into_iter()
+            .for_each(|update| validator_set.apply(update));
+        Ok(())
+    }
+
     fn validate_transaction(&self, transaction: &Transaction) -> Result<()> {
+        transaction.verify()?;
+
         let result = match transaction {
             Transaction::Deployment {
                 ref program,
@@ -364,6 +405,11 @@ impl SnarkVMApp {
                     !transitions.is_empty(),
                     "There are no transitions in the execution"
                 );
+
+                let validator_set = self.validators.lock().unwrap();
+                for update in transaction.stake_updates()? {
+                    validator_set.validate(&update)?
+                }
 
                 for transition in transitions {
                     self.verify_transition(transition)?;
@@ -433,27 +479,131 @@ impl HeightFile {
     }
 }
 
-// just covering a few special cases here. lower level test are done in record store, higher level in integration tests.
+// just covering a few special cases here. lower level test are done in record store and program store, higher level in integration tests.
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use lib::{
+        transaction::Transaction,
+        vm::{self, Identifier},
+    };
+    use serde_json::json;
+    use std::{
+        path::Path,
+        str::FromStr,
+        sync::{Arc, Mutex},
+    };
+    use tendermint_abci::Application;
+    use tendermint_proto::abci::{RequestCheckTx, RequestDeliverTx};
+
+    use crate::{
+        program_store::ProgramStore, record_store::RecordStore, validator_set::ValidatorSet,
+    };
+
+    use super::SnarkVMApp;
 
     #[test]
-    fn test_check_tx() {
-        // TODO
-        // fail if duplicate (non spent) inputs
-        // fail if already spent inputs
-        // succeed otherwise
+    fn test_abci_hooks() {
+        let app = SnarkVMApp {
+            programs: ProgramStore::new("programs_test").expect("could not create a program store"),
+            records: RecordStore::new("records_test").expect("could not create a record store"),
+            validators: Arc::new(Mutex::new(ValidatorSet::load_or_create(Path::new("void")))),
+        };
+
+        let private_key = vm::PrivateKey::new(&mut rand::thread_rng()).unwrap();
+        let view_key = vm::ViewKey::try_from(&private_key).unwrap();
+        let address = vm::Address::try_from(&view_key).unwrap();
+
+        let program = vm::generate_program(include_str!("../../aleo/records.aleo")).unwrap();
+
+        // deploy the program to the app
+        let deployment_transaction =
+            Transaction::deployment(Path::new("aleo/records.aleo"), &private_key, None).unwrap();
+
+        let _ = app.store_program(&deployment_transaction);
+
+        // normal execution to mint a record, validations should succeed
+        let transaction = Transaction::execution(
+            program.clone(),
+            Identifier::from_str("mint").unwrap(),
+            &[
+                vm::u64_to_value(10),
+                vm::UserInputValueType::from_str(&address.to_string()).unwrap(),
+            ],
+            &private_key,
+            None,
+        )
+        .unwrap();
+
+        let check_tx_req = check_request(&transaction);
+        assert!(app.check_tx(check_tx_req).code == 0);
+
+        let transaction_json = json!(transaction);
+
+        // extract the record to use in upcoming transactions
+        let output_record = transaction_json
+            .pointer("/Execution/transitions/0/outputs/0/value")
+            .unwrap()
+            .as_str()
+            .unwrap();
+
+        let ciphertext = vm::EncryptedRecord::from_str(output_record).unwrap();
+        let record = ciphertext
+            .decrypt(&view_key)
+            .map(vm::UserInputValueType::Record)
+            .unwrap();
+
+        // utilize the same record twice
+        let consume_two_transaction = Transaction::execution(
+            program.clone(),
+            Identifier::from_str("consume_two").unwrap(),
+            &[record.clone(), record.clone()],
+            &private_key,
+            None,
+        )
+        .unwrap();
+
+        // both check_tx and deliver_tx validate that inputs are not being spent twice
+        let check_tx_req = check_request(&consume_two_transaction);
+        let deliver_tx_req = deliver_request(&consume_two_transaction);
+        assert!(app.check_tx(check_tx_req).code != 0);
+        assert!(app.deliver_tx(deliver_tx_req).code != 0);
+
+        // because validations failed, inputs should not be spent in the store
+        app.check_inputs_are_unspent(&consume_two_transaction)
+            .unwrap();
+
+        // consume the record
+        let consume_transaction = Transaction::execution(
+            program,
+            Identifier::from_str("consume").unwrap(),
+            &[record],
+            &private_key,
+            None,
+        )
+        .unwrap();
+
+        let check_tx_req = check_request(&consume_transaction);
+        let deliver_tx_req = deliver_request(&consume_transaction);
+
+        // because the transaction is valid, check and deliver should succeed
+        assert!(app.check_tx(check_tx_req.clone()).code == 0);
+        assert!(app.deliver_tx(deliver_tx_req.clone()).code == 0);
+
+        // because deliver_tx() spends the records, further validations should fail
+        assert!(app.check_tx(check_tx_req).code != 0);
+        assert!(app.deliver_tx(deliver_tx_req).code != 0);
     }
 
-    #[test]
-    fn test_deliver_tx() {
-        // fail if duplicate (non spent) inputs
-        // check that they remain unspent
+    fn check_request(transaction: &Transaction) -> RequestCheckTx {
+        RequestCheckTx {
+            tx: bincode::serialize(transaction).unwrap(),
+            r#type: 0,
+        }
+    }
 
-        // fail if already spent inputs
-
-        // check that inputs are not unspent anymore
-        // check that outputs are now unspent
+    fn deliver_request(transaction: &Transaction) -> RequestDeliverTx {
+        RequestDeliverTx {
+            tx: bincode::serialize(transaction).unwrap(),
+        }
     }
 }

@@ -1,8 +1,10 @@
 use crate::load_credits;
+use crate::validator;
 use crate::vm::{self, VerifyingKeyMap};
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use log::debug;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
@@ -18,18 +20,6 @@ pub enum Transaction {
     Execution {
         id: String,
         transitions: Vec<vm::Transition>,
-
-        /// The pub key of the tendermint validator that staked credits go to,
-        /// in case this is a staking/unstaking execution.
-        // NOTE: for most purposes the stake/unstake transactions are just another type of/ execution.
-        // we could handle most of the special properties as methods in Transaction, but since the vm
-        // doesn't have support for a type where we could fit the validator address, we need to treat it
-        // as a special case and pass it separately (which also prevents us to include that address in the
-        // execution proof).
-        // also NOTE: having the address out of the record and as a separate field means that we can't ensure
-        // the voting power gets removed from the same tendermint validator that did the staking in the first place.
-        // we may work around that but ideally having the tendermint address in the record would be preferable
-        validator: Option<String>,
     },
 }
 
@@ -52,16 +42,17 @@ impl Transaction {
             .map(|(i, keys)| (i, keys.1))
             .collect();
 
-        let id = uuid::Uuid::new_v4().to_string();
         let fee = Self::execute_fee(private_key, fee, 0)?;
-        Ok(Transaction::Deployment {
-            id,
+
+        Transaction::Deployment {
+            id: "not known yet".to_string(),
             fee,
             program: Box::new(program),
             verifying_keys: VerifyingKeyMap {
                 map: verifying_keys,
             },
-        })
+        }
+        .set_hashed_id()
     }
 
     // Used to generate an execution of a program in path or an execution of the credits program
@@ -81,13 +72,11 @@ impl Transaction {
             transitions.push(transition);
         }
 
-        let id = uuid::Uuid::new_v4().to_string();
-
-        Ok(Self::Execution {
-            id,
+        Self::Execution {
+            id: "not known yet".to_string(),
             transitions,
-            validator: None,
-        })
+        }
+        .set_hashed_id()
     }
 
     pub fn credits_execution(
@@ -95,7 +84,6 @@ impl Transaction {
         inputs: &[vm::UserInputValueType],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
-        validator: Option<String>,
     ) -> Result<Self> {
         let program = vm::Program::credits()?;
 
@@ -108,12 +96,11 @@ impl Transaction {
             transitions.push(transition);
         }
 
-        let id = uuid::Uuid::new_v4().to_string();
-        Ok(Self::Execution {
-            id,
+        Self::Execution {
+            id: "not known yet".to_string(),
             transitions,
-            validator,
-        })
+        }
+        .set_hashed_id()
     }
 
     pub fn id(&self) -> &str {
@@ -185,6 +172,47 @@ impl Transaction {
         }
     }
 
+    /// Extract a list of validator updates that result from the current execution.
+    /// This will return a non-empty vector in case some of the transitions are of the
+    /// stake or unstake functions in the credits program.
+    pub fn stake_updates(&self) -> Result<Vec<validator::Stake>> {
+        let mut result = Vec::new();
+        if let Self::Execution { transitions, .. } = self {
+            for transition in transitions {
+                if transition.program_id().to_string() == "credits.aleo" {
+                    let extract_output = |index: usize| {
+                        transition
+                            .outputs()
+                            .get(index)
+                            .ok_or_else(|| anyhow!("couldn't find staking output in transition"))
+                    };
+
+                    let amount = match transition.function_name().to_string().as_str() {
+                        "stake" => vm::int_from_output::<u64>(extract_output(2)?)? as i64,
+                        "unstake" => -(vm::int_from_output::<u64>(extract_output(2)?)? as i64),
+                        _ => continue,
+                    };
+
+                    // TODO: Factor out the following extraction and test it as with the original conversion
+
+                    let validator_higher: u128 = vm::int_from_output(extract_output(4)?)?;
+                    let validator_lower: u128 = vm::int_from_output(extract_output(5)?)?;
+
+                    let validator = Transaction::validator_address_from_numbers(
+                        validator_higher,
+                        validator_lower,
+                    )?;
+
+                    let aleo_address = vm::address_from_output(extract_output(3)?)?;
+                    let validator = validator::Stake::new(&validator, aleo_address, amount)?;
+
+                    result.push(validator);
+                }
+            }
+        }
+        Ok(result)
+    }
+
     /// If there is some required fee, return the transition resulting of executing
     /// the fee function of the credits program for the requested amount.
     /// The fee function just burns the desired amount of credits, so its effect is just
@@ -241,6 +269,90 @@ impl Transaction {
 
         vm::execution(program, function, inputs, private_key)
     }
+
+    /// Verify that the transaction id is consistent with its contents, by checking it's sha256 hash.
+    pub fn verify(&self) -> Result<()> {
+        ensure!(
+            self.id() == self.hash()?,
+            "Corrupted transaction: Inconsistent transaction id"
+        );
+
+        Ok(())
+    }
+
+    /// Hash the contents of the given enum and return it with the hash as its id.
+    fn set_hashed_id(mut self) -> Result<Self> {
+        let new_id = self.hash()?;
+        match self {
+            Transaction::Deployment { ref mut id, .. } => *id = new_id,
+            Transaction::Execution { ref mut id, .. } => *id = new_id,
+        };
+        Ok(self)
+    }
+
+    /// Calculate a sha256 hash of the contents of the transaction (dependent on the transaction type)
+    fn hash(&self) -> Result<String> {
+        let mut hasher = Sha256::new();
+
+        let variant_code: u8 = match self {
+            Transaction::Deployment { .. } => 0,
+            Transaction::Execution { .. } => 1,
+        };
+        hasher.update(variant_code.to_be_bytes());
+
+        match self {
+            Transaction::Deployment {
+                id: _id,
+                program,
+                verifying_keys,
+                fee,
+            } => {
+                hasher.update(program.id().to_string());
+
+                for (key, value) in verifying_keys.map.clone().into_iter() {
+                    hasher.update(key.to_string());
+                    hasher.update(serde_json::to_string(&value)?);
+                }
+
+                if let Some(fee) = fee {
+                    hasher.update(fee.to_string());
+                }
+            }
+            Transaction::Execution {
+                id: _id,
+                transitions,
+            } => {
+                for transition in transitions.iter() {
+                    hasher.update(serde_json::to_string(transition)?);
+                }
+            }
+        }
+
+        let hash = hasher.finalize().as_slice().to_owned();
+        Ok(hex::encode(hash))
+    }
+
+    // TODO: Move this to validator set/use tendermint-rs structs for pub keys?
+    pub fn validator_address_as_numbers(bytes: &[u8]) -> Result<(u128, u128)> {
+        ensure!(
+            bytes.len() == 32,
+            "Input validator address is not 32 bytes long"
+        );
+        let high_part: [u8; 16] = bytes[0..16].try_into()?;
+        let low_part: [u8; 16] = bytes[16..].try_into()?;
+
+        Ok((
+            u128::from_be_bytes(high_part),
+            u128::from_be_bytes(low_part),
+        ))
+    }
+
+    pub fn validator_address_from_numbers(higher: u128, lower: u128) -> Result<String> {
+        let mut address = higher.to_be_bytes().to_vec();
+
+        address.append(&mut lower.to_be_bytes().to_vec());
+        Ok(base64::encode(address))
+    }
 }
 
 impl std::fmt::Display for Transaction {
@@ -249,21 +361,26 @@ impl std::fmt::Display for Transaction {
             Transaction::Deployment { id, program, .. } => {
                 write!(f, "Deployment({},{})", id, program.id())
             }
-            Transaction::Execution {
-                id,
-                transitions,
-                validator: None,
-            } => {
+            Transaction::Execution { id, transitions } => {
                 let transition = transitions.first().unwrap();
                 write!(f, "Execution({},{id})", transition.program_id())
             }
-            Transaction::Execution {
-                id,
-                validator: Some(validator),
-                ..
-            } => {
-                write!(f, "StakingExecution({id},{validator})")
-            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::transaction::Transaction;
+
+    #[test]
+    fn convert_validator_address() {
+        let pub_key = "KvYujhwQVoCOH1B3FrmtjSN5GgKUjarOKDNIbWfA8hc=";
+        let key_encoded = base64::decode(pub_key).unwrap();
+        let (h, l) = Transaction::validator_address_as_numbers(&key_encoded).unwrap();
+        assert!(h == 57105825100092210844007095251039268237u128);
+        assert!(l == 47151775319435836265997973510082851351u128);
+
+        assert!(Transaction::validator_address_from_numbers(h, l).unwrap() == pub_key);
     }
 }

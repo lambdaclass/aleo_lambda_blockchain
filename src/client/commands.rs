@@ -108,9 +108,6 @@ pub enum Credits {
         /// The stake record to recover the staked amount from.
         #[clap(value_parser=parse_input_record)]
         record: vm::UserInputValueType,
-        /// The tendermint address of the validator that is staking the credits.
-        #[clap()]
-        validator: String,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
         fee: Option<u64>,
@@ -256,8 +253,20 @@ impl Command {
 
                     let mut transaction_json = json!(transaction);
                     if !dry_run {
-                        let transaction_serialized = bincode::serialize(&transaction).unwrap();
-                        tendermint::broadcast(transaction_serialized, &url).await?;
+                        let mut transaction_json = json!(transaction);
+                        if !dry_run {
+                            let transaction_serialized = bincode::serialize(&transaction).unwrap();
+                            tendermint::broadcast(transaction_serialized, &url).await?;
+                        } else {
+                            let records = Self::decrypt_records(&transaction, credentials);
+
+                            if !records.is_empty() {
+                                transaction_json
+                                    .as_object_mut()
+                                    .unwrap()
+                                    .insert("decrypted_records".to_string(), json!(records));
+                            }
+                        }
                     } else {
                         let records = Self::decrypt_records(&transaction, credentials);
 
@@ -287,18 +296,10 @@ impl Command {
                     let inputs = [
                         input_record.clone(),
                         recipient_address.clone(),
-                        u64_to_value(amount),
+                        vm::u64_to_value(amount),
                     ];
-                    run_credits_command(
-                        &credentials,
-                        &url,
-                        "transfer",
-                        &inputs,
-                        None,
-                        &fee,
-                        &fee_record,
-                    )
-                    .await?
+                    run_credits_command(&credentials, &url, "transfer", &inputs, &fee, &fee_record)
+                        .await?
                 }
                 Command::Credits(Credits::Combine {
                     first_record,
@@ -307,16 +308,8 @@ impl Command {
                     fee_record,
                 }) => {
                     let inputs = [first_record.clone(), second_record.clone()];
-                    run_credits_command(
-                        &credentials,
-                        &url,
-                        "combine",
-                        &inputs,
-                        None,
-                        &fee,
-                        &fee_record,
-                    )
-                    .await?
+                    run_credits_command(&credentials, &url, "combine", &inputs, &fee, &fee_record)
+                        .await?
                 }
                 Command::Credits(Credits::Split {
                     input_record,
@@ -324,17 +317,9 @@ impl Command {
                     fee,
                     fee_record,
                 }) => {
-                    let inputs = [input_record.clone(), u64_to_value(amount)];
-                    run_credits_command(
-                        &credentials,
-                        &url,
-                        "split",
-                        &inputs,
-                        None,
-                        &fee,
-                        &fee_record,
-                    )
-                    .await?
+                    let inputs = [input_record.clone(), vm::u64_to_value(amount)];
+                    run_credits_command(&credentials, &url, "split", &inputs, &fee, &fee_record)
+                        .await?
                 }
                 Command::Credits(Credits::Stake {
                     amount,
@@ -343,36 +328,28 @@ impl Command {
                     fee,
                     fee_record,
                 }) => {
-                    let inputs = [record.clone(), u64_to_value(amount)];
-                    run_credits_command(
-                        &credentials,
-                        &url,
-                        "stake",
-                        &inputs,
-                        Some(validator),
-                        &fee,
-                        &fee_record,
-                    )
-                    .await?
+                    let (validator_higher, validator_lower) =
+                        Transaction::validator_address_as_numbers(&base64::decode(validator)?)?;
+
+                    let inputs = [
+                        record.clone(),
+                        vm::u64_to_value(amount),
+                        vm::u128_to_value(validator_higher),
+                        vm::u128_to_value(validator_lower),
+                    ];
+
+                    run_credits_command(&credentials, &url, "stake", &inputs, &fee, &fee_record)
+                        .await?
                 }
                 Command::Credits(Credits::Unstake {
                     amount,
                     record,
-                    validator,
                     fee,
                     fee_record,
                 }) => {
-                    let inputs = [record.clone(), u64_to_value(amount)];
-                    run_credits_command(
-                        &credentials,
-                        &url,
-                        "unstake",
-                        &inputs,
-                        Some(validator),
-                        &fee,
-                        &fee_record,
-                    )
-                    .await?
+                    let inputs = [record.clone(), vm::u64_to_value(amount)];
+                    run_credits_command(&credentials, &url, "unstake", &inputs, &fee, &fee_record)
+                        .await?
                 }
                 Command::Get(Get {
                     transaction_id,
@@ -428,19 +405,13 @@ async fn run_credits_command(
     url: &str,
     function: &str,
     inputs: &[vm::UserInputValueType],
-    validator: Option<String>,
     fee_amount: &Option<u64>,
     fee_record: &Option<vm::UserInputValueType>,
 ) -> Result<serde_json::Value> {
     let fee = choose_fee_record(credentials, url, fee_amount, fee_record, inputs).await?;
     let function_identifier = vm::Identifier::from_str(function)?;
-    let transaction = Transaction::credits_execution(
-        function_identifier,
-        inputs,
-        &credentials.private_key,
-        fee,
-        validator,
-    )?;
+    let transaction =
+        Transaction::credits_execution(function_identifier, inputs, &credentials.private_key, fee)?;
     let transaction_serialized = bincode::serialize(&transaction).unwrap();
     tendermint::broadcast(transaction_serialized, url).await?;
     Ok(json!(transaction))
