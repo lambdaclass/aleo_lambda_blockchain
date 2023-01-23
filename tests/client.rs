@@ -235,31 +235,23 @@ fn token_transaction() {
         }
     }
 
+    // Get, decrypt and assert correctness of Bob output record: Should have 5u64.private in the amount variable
+    let transaction = retry_command(_bob_home, &["get", transfer_transaction_id, "-d"]).unwrap();
+    let (owner, _gates, amount) = get_decrypted_record(&transaction);
     cfg_if::cfg_if! {
         if #[cfg(feature = "vmtropy_backend")] {
-            // Bob is not able to decrypt his records atm because his records
-            // are being encrypted with Alice's view key.
-            // The difference here between this and snarkVM's is that in snarkVM
-            // encryption is asymmetric and records could be encrypted using
-            // the address. In VMtropy records are encrypted using only the
-            // view key.
+            assert_eq!(
+                owner,
+                format!("{}", bob_credentials.get("address").unwrap())
+            );
 
-            // // Get, decrypt and assert correctness of Bob output record: Should have 5u64.private in the amount variable
-            // let transaction = retry_command(_bob_home, &["get", transfer_transaction_id, "-d"]).unwrap();
-            // let (owner, _gates, amount) = get_decrypted_record(&transaction);
-            // assert_eq!(
-            //     owner,
-            //     format!("{}", bob_credentials.get("address").unwrap())
-            // );
-            // assert_eq!(amount, "5u64");
+            assert_eq!(amount, "5u64");
         } else if #[cfg(feature = "snarkvm_backend")] {
-            // Get, decrypt and assert correctness of Bob output record: Should have 5u64.private in the amount variable
-            let transaction = retry_command(_bob_home, &["get", transfer_transaction_id, "-d"]).unwrap();
-            let (owner, _gates, amount) = get_decrypted_record(&transaction);
             assert_eq!(
                 owner,
                 format!("{}.private", bob_credentials.get("address").unwrap())
             );
+
             assert_eq!(amount, "5u64.private");
         } else {
             compile_error!("You must use a backend");
