@@ -137,7 +137,7 @@ impl Transaction {
             .transitions()
             .iter()
             .flat_map(|transition| transition.output_records())
-            .map(|record| (record.commitment.clone(), record))
+            .map(|(commitment, record)| (commitment, record))
             .collect();
     }
 

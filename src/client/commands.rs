@@ -469,10 +469,6 @@ fn parse_input_value(input: &str) -> Result<vm::UserInputValueType> {
 }
 
 pub fn parse_input_record(input: &str) -> Result<vm::UserInputValueType> {
-    #[cfg(feature = "vmtropy_backend")]
-    let encrypted_record = EncryptedRecord::try_from(&(hex::decode(&input[6..])?.to_vec()))?;
-
-    #[cfg(feature = "snarkvm_backend")]
     let encrypted_record = vm::EncryptedRecord::from_str(input)?;
 
     let credentials = account::Credentials::load()?;
@@ -506,13 +502,8 @@ async fn get_records(
                 .ok()
                 .filter(|(_, _ciphertext, _decrypted_record)| {
                     let serial_number = compute_serial_number(credentials.private_key, commitment);
-                    #[cfg(feature = "snarkvm_backend")]
                     return serial_number.is_ok()
                         && !spent_records.contains(&serial_number.unwrap());
-                    #[cfg(feature = "vmtropy_backend")]
-                    return serial_number.is_ok()
-                        && !spent_records.contains(&serial_number.unwrap())
-                        && _ciphertext.is_owner(&credentials.address, &credentials.view_key);
                 })
         })
         .collect();
@@ -616,6 +607,7 @@ fn select_default_fee_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vm::Address;
 
     #[test]
     fn select_default_record() {
@@ -676,7 +668,8 @@ mod tests {
     }
 
     fn mint_record(view_key: &vm::ViewKey, amount: u64) -> vm::Record {
-        vm::mint_record("credits.aleo", "credits", view_key, amount, 123)
+        let address = Address::try_from(view_key).unwrap();
+        vm::mint_record("credits.aleo", "credits", &address, amount, 123)
             .unwrap()
             .1
             .decrypt(view_key)

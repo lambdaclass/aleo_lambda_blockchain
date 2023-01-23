@@ -237,14 +237,7 @@ impl RecordStore {
                 let commitment =
                     Commitment::from_str(&String::from_utf8_lossy(commitment)).unwrap();
 
-                #[cfg(feature = "snarkvm_backend")]
                 let record = EncryptedRecord::from_str(&String::from_utf8_lossy(record)).unwrap();
-
-                // TODO: We can't recover the EncryptedRecord from a string
-                // because we don't know how long the last block is (i.e. how much padding there is)
-                // Maybe we can append the length to the ciphertext at the beginning?
-                #[cfg(feature = "vmtropy_backend")]
-                let record: EncryptedRecord = EncryptedRecord::try_from(record).unwrap();
 
                 (commitment, record)
             })
@@ -427,14 +420,17 @@ mod tests {
 
     #[cfg(feature = "vmtropy_backend")]
     fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
+        use vmtropy::snarkvm::prelude::{Scalar, Uniform};
+
         let address =
             String::from("aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry");
-        let record = Record::new_from_aleo_address(address, 5, IndexMap::new(), None);
-        let commitment = record.commitment().unwrap();
+        let mut record = Record::new_from_aleo_address(address, 5, IndexMap::new(), None);
 
         let private_key = PrivateKey::new(&mut rand::thread_rng()).unwrap();
-        let view_key = ViewKey::try_from(&private_key).unwrap();
-        let record_ciphertext = record.encrypt(&view_key).unwrap();
+        let rng = &mut rand::thread_rng();
+        let randomizer = Scalar::rand(rng);
+        let record_ciphertext = record.encrypt(randomizer).unwrap();
+        let commitment = record.commitment().unwrap();
         let serial_number = compute_serial_number(private_key, commitment.clone()).unwrap();
 
         (record_ciphertext, commitment, serial_number)

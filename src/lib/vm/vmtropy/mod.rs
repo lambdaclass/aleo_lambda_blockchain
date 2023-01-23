@@ -189,32 +189,14 @@ pub fn execution(
         .map_err(|e| anyhow!("{}", e))?;
 
     let (compiled_function_variables, proof) =
-        vmtropy::execute_function(&program, &function, inputs)?;
+        vmtropy::execute_function(&program, &function_name.to_string(), inputs)?;
 
     let inputs = vmtropy::jaleo::process_circuit_inputs(
         &function,
         &compiled_function_variables,
         private_key,
     )?;
-    let view_key = ViewKey::try_from(private_key)?;
-    let mut outputs =
-        vmtropy::jaleo::process_circuit_outputs(&function, &compiled_function_variables, view_key)?;
-
-    // This for loop deserves an explanation. The problem is the following:
-    // Because we currently don't support padding when encrypting records with AES,
-    // we have to keep track of the size of the record in the `original_size` field,
-    // otherwise when decrypting we don't know when to stop. This makes the `ciphertext` field
-    // of an encrypted record not enough to get the original record back. Because CLI users
-    // rely on the `ciphertext` field to pass records to spend, we have to modify this value with
-    // the full serialized `EncryptedRecord` struct so it can be used to spend them.
-    for (_name, output) in outputs.iter_mut() {
-        if let VariableType::EncryptedRecord(record) = output {
-            let mut prefixed_serialized_record = "record".to_owned();
-            let serialized = hex::encode(record.to_string().as_bytes());
-            prefixed_serialized_record.push_str(&serialized);
-            record.ciphertext = prefixed_serialized_record;
-        }
-    }
+    let outputs = vmtropy::jaleo::process_circuit_outputs(&function, &compiled_function_variables)?;
 
     let bytes_proof = vmtropy::jaleo::serialize_proof(proof)?;
     let encoded_proof = hex::encode(bytes_proof);
@@ -255,7 +237,7 @@ fn sha3_hash(input: &[u8]) -> String {
 pub fn mint_record(
     _program_id: &str,
     _record_name: &str,
-    owner_view_key: &ViewKey,
+    owner_address: &Address,
     gates: u64,
     seed: u64,
 ) -> Result<(Field, EncryptedRecord)> {
@@ -264,5 +246,5 @@ pub fn mint_record(
     // The seed is used for instantiating a randomizer, which is used to generate the nonce
     // and encrypt the record. Once again, we don't really do things that way for now.
 
-    mint_credits(owner_view_key, gates, seed)
+    mint_credits(owner_address, gates, seed)
 }

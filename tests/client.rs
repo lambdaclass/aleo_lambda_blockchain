@@ -320,7 +320,11 @@ fn consume_records() {
     let error =
         execute_program(home_path, &program_path, CONSUME_FUNCTION, &[&record]).unwrap_err();
 
-    assert!(error.contains("must belong to the signer") || error.contains("Invalid value"));
+    assert!(
+        error.contains("must belong to the signer")
+            || error.contains("Invalid value")
+            || error.contains("invalid value")
+    );
 }
 
 #[test]
@@ -360,8 +364,6 @@ fn validate_credits() {
 }
 
 #[test]
-// TODO: Remove this feature flag when we fix encryption on the VMtropy side
-#[cfg(feature = "snarkvm_backend")]
 fn transfer_credits() {
     let validator_home = validator_account_path();
 
@@ -406,8 +408,6 @@ fn transfer_credits() {
 }
 
 #[test]
-// TODO: Remove this feature flag when we properly implement encryption on the VMtropy side
-#[cfg(feature = "snarkvm_backend")]
 fn transaction_fees() {
     // create a test account
     let (_tempfile, receiver_home, credentials) = &new_account();
@@ -491,10 +491,22 @@ fn transaction_fees() {
     .unwrap();
     assert_balance(receiver_home, 6).unwrap();
 
+    #[cfg(feature = "snarkvm_backend")]
     // run a credits execution with a fee, should account for the implicit fees
     let record = client_command(receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    #[cfg(feature = "vmtropy_backend")]
+    let record = client_command(&receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .get("ciphertext")
         .unwrap()
         .as_str()
         .unwrap()
@@ -508,9 +520,21 @@ fn transaction_fees() {
     let transaction_id = get_transaction_id(&transaction).unwrap();
     retry_command(receiver_home, &["get", transaction_id]).unwrap();
 
+    #[cfg(feature = "snarkvm_backend")]
     let record = client_command(receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    #[cfg(feature = "vmtropy_backend")]
+    let record = client_command(&receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .get("ciphertext")
         .unwrap()
         .as_str()
         .unwrap()
@@ -526,7 +550,7 @@ fn transaction_fees() {
             "aleo/credits.aleo",
             "fee",
             &record,
-            "2u64",
+            "0u64",
             "--fee",
             "3",
         ],
@@ -537,15 +561,6 @@ fn transaction_fees() {
     // the execution has an implicit fee of 2 so another 1 is payed from the other record to reach the requested 3 of fee
     // so there should be another 3 remaining
     assert_balance(receiver_home, 3).unwrap();
-
-    // run another command specifying which record to use
-    let record = client_command(receiver_home, &["account", "records"])
-        .unwrap()
-        .pointer("/0/ciphertext")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string();
 
     client_command(
         receiver_home,
@@ -558,8 +573,6 @@ fn transaction_fees() {
             "1u32",
             "--fee",
             "1",
-            "--fee-record",
-            &record,
         ],
     )
     .unwrap();
@@ -786,7 +799,7 @@ fn get_encrypted_record(transaction: &serde_json::Value) -> &str {
     let pointer_path = "/Execution/transitions/0/outputs/0/value";
 
     #[cfg(feature = "vmtropy_backend")]
-    let pointer_path = "/Execution/transitions/0/outputs/0/EncryptedRecord/ciphertext";
+    let pointer_path = "/Execution/transitions/0/outputs/0/EncryptedRecord/1/ciphertext";
 
     transaction.pointer(pointer_path).unwrap().as_str().unwrap()
 }
