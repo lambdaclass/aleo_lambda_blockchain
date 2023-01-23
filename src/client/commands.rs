@@ -319,14 +319,16 @@ impl Command {
                     fee,
                     fee_record,
                 }) => {
-                    let (validator_higher, validator_lower) =
-                        Transaction::validator_address_as_numbers(&base64::decode(validator)?)?;
+                    let validator_split=
+                        Transaction::validator_key_as_u64s(&base64::decode(validator)?)?;
 
                     let inputs = [
                         record.clone(),
                         vm::u64_to_value(amount),
-                        vm::u128_to_value(validator_higher),
-                        vm::u128_to_value(validator_lower),
+                        vm::u64_to_value(validator_split[0]),
+                        vm::u64_to_value(validator_split[1]),
+                        vm::u64_to_value(validator_split[2]),
+                        vm::u64_to_value(validator_split[3])
                     ];
 
                     run_credits_command(&credentials, &url, "stake", &inputs, &fee, &fee_record)

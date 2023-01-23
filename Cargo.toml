@@ -57,6 +57,13 @@ indexmap = "1.9.2"
 itertools = "0.10.5"
 sha2 = "0.10.6"
 base64 = "0.20.0"
+sha3 = "0.10.6"
+cfg-if = "1"
+
+[dependencies.vmtropy]
+git = "ssh://git@github.com/lambdaclass/VMtropy.git"
+branch = "main"
+optional = true
 
 [dependencies.snarkvm]
 git = "https://github.com/lambdaclass/snarkVM.git"
