@@ -2,6 +2,7 @@ use crate::load_credits;
 use crate::validator;
 use crate::vm::{self, VerifyingKeyMap};
 use anyhow::{anyhow, ensure, Result};
+use itertools::Itertools;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -195,13 +196,14 @@ impl Transaction {
 
                     // TODO: Factor out the following extraction and test it as with the original conversion
 
-                    let validator_higher: u128 = vm::int_from_output(extract_output(4)?)?;
-                    let validator_lower: u128 = vm::int_from_output(extract_output(5)?)?;
+                    let validator_key: [u64; 4] = [
+                        vm::int_from_output(extract_output(4)?)?,
+                        vm::int_from_output(extract_output(5)?)?,
+                        vm::int_from_output(extract_output(6)?)?,
+                        vm::int_from_output(extract_output(7)?)?,
+                    ];
 
-                    let validator = Transaction::validator_address_from_numbers(
-                        validator_higher,
-                        validator_lower,
-                    )?;
+                    let validator = Transaction::validator_key_from_u64s(&validator_key)?;
 
                     let aleo_address = vm::address_from_output(extract_output(3)?)?;
                     let validator = validator::Stake::new(&validator, aleo_address, amount)?;
@@ -333,7 +335,7 @@ impl Transaction {
     }
 
     // TODO: Move this to validator set/use tendermint-rs structs for pub keys?
-    pub fn validator_address_as_numbers(bytes: &[u8]) -> Result<(u128, u128)> {
+    pub fn validator_key_as_u128s(bytes: &[u8]) -> Result<(u128, u128)> {
         ensure!(
             bytes.len() == 32,
             "Input validator address is not 32 bytes long"
@@ -347,11 +349,48 @@ impl Transaction {
         ))
     }
 
-    pub fn validator_address_from_numbers(higher: u128, lower: u128) -> Result<String> {
+    pub fn validator_key_from_u128s(higher: u128, lower: u128) -> Result<String> {
         let mut address = higher.to_be_bytes().to_vec();
 
         address.append(&mut lower.to_be_bytes().to_vec());
         Ok(base64::encode(address))
+    }
+
+    /// Returns a slice of 32 bytes (the size of a Tendermint Public Key) as 4 sections of `u64`s
+    /// where the order of the `u64s` is from the most significant to the least significant
+    pub fn validator_key_as_u64s(bytes: &[u8]) -> Result<Vec<u64>> {
+        ensure!(
+            bytes.len() == 32,
+            "Input validator address is not 32 bytes long"
+        );
+
+        let sections: Vec<u64> = bytes
+            .chunks_exact(8)
+            .map(|x| u64::from_be_bytes(x.try_into().expect("error converting address into u64s")))
+            .collect();
+
+        ensure!(
+            sections.len() == 4,
+            "Input validator address was incorrectly converted"
+        );
+
+        Ok(sections)
+    }
+
+    /// Returns a Tendermint Public Key from a slice of 4 `u64`s, where the first `u64`
+    /// corresponds to the most significant section of bytes and the order of significance
+    /// is descending
+    pub fn validator_key_from_u64s(sections: &[u64]) -> Result<String> {
+        ensure!(
+            sections.len() == 4,
+            "Input validator address does not have 4 sections"
+        );
+
+        let sections = sections
+            .into_iter()
+            .flat_map(|x| x.to_be_bytes())
+            .collect_vec();
+        Ok(base64::encode(&sections))
     }
 }
 
@@ -374,13 +413,30 @@ mod tests {
     use crate::transaction::Transaction;
 
     #[test]
-    fn convert_validator_address() {
+    fn convert_validator_address_u128() {
         let pub_key = "KvYujhwQVoCOH1B3FrmtjSN5GgKUjarOKDNIbWfA8hc=";
         let key_encoded = base64::decode(pub_key).unwrap();
-        let (h, l) = Transaction::validator_address_as_numbers(&key_encoded).unwrap();
+        let (h, l) = Transaction::validator_key_as_u128s(&key_encoded).unwrap();
         assert!(h == 57105825100092210844007095251039268237u128);
         assert!(l == 47151775319435836265997973510082851351u128);
 
-        assert!(Transaction::validator_address_from_numbers(h, l).unwrap() == pub_key);
+        assert!(Transaction::validator_key_from_u128s(h, l).unwrap() == pub_key);
+    }
+
+    #[test]
+    fn convert_validator_address_u64() {
+        let pub_key = "KvYujhwQVoCOH1B3FrmtjSN5GgKUjarOKDNIbWfA8hc=";
+        let key_encoded = base64::decode(pub_key).unwrap();
+        let key_sections = Transaction::validator_key_as_u64s(&key_encoded).unwrap();
+
+        let expected_slice = [
+            3095712981754861184u64,
+            10240992550076394893u64,
+            2556102861894036174u64,
+            2896738620058694167u64,
+        ];
+
+        assert_eq!(key_sections, expected_slice);
+        assert!(Transaction::validator_key_from_u64s(&key_sections).unwrap() == pub_key);
     }
 }
