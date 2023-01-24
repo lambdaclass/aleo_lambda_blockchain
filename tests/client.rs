@@ -513,7 +513,7 @@ fn staking() {
         ],
     )
     .unwrap_err();
-    println!("{error}");
+    
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
     // this should be improved to properly handle execution errors internally and showing a clear error message in the CLI
     assert!(error.contains("Integer subtraction failed"));
