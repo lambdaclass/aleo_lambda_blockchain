@@ -10,13 +10,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProgramFile {
     pub program: vm::Program,
-    pub keys: vm::KeyPairMap,
+    pub keys: vm::ProgramBuild,
 }
 
 impl ProgramFile {
     pub fn build(program_source: &str) -> Result<Self> {
-        let program = vm::generate_program(program_source)?;
-        let keys = vm::synthesize_program_keys(&program)?;
+        let (program, keys) = vm::build_program(program_source)?;
 
         Ok(Self { program, keys })
     }
@@ -26,7 +25,7 @@ impl ProgramFile {
         std::fs::write(output_path, json).map_err(|e| anyhow!(e))
     }
 
-    pub fn load(path: &Path) -> Result<(vm::Program, vm::KeyPairMap)> {
+    pub fn load(path: &Path) -> Result<(vm::Program, vm::ProgramBuild)> {
         let json = std::fs::read_to_string(path)
             .map_err(|e| anyhow!("couldn't find stored program: {e}"))?;
         let stored: Self = serde_json::from_str(&json)?;

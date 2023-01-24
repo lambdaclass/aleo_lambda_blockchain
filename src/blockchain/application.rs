@@ -357,10 +357,11 @@ impl SnarkVMApp {
 
     /// Add the tranasction output records as unspent in the record store.
     fn add_output_records(&self, transaction: &Transaction) -> Result<()> {
+        #[allow(clippy::clone_on_copy)]
         transaction
             .output_records()
             .iter()
-            .map(|(commitment, record)| self.records.add(*commitment, record.clone()))
+            .map(|(commitment, record)| self.records.add(commitment.clone(), record.clone()))
             .find(|result| result.is_err())
             .unwrap_or(Ok(()))
     }
@@ -526,7 +527,7 @@ mod tests {
             Identifier::from_str("mint").unwrap(),
             &[
                 vm::u64_to_value(10),
-                vm::Value::from_str(&address.to_string()).unwrap(),
+                vm::UserInputValueType::from_str(&address.to_string()).unwrap(),
             ],
             &private_key,
             None,
@@ -548,7 +549,7 @@ mod tests {
         let ciphertext = vm::EncryptedRecord::from_str(output_record).unwrap();
         let record = ciphertext
             .decrypt(&view_key)
-            .map(vm::Value::Record)
+            .map(vm::UserInputValueType::Record)
             .unwrap();
 
         // utilize the same record twice

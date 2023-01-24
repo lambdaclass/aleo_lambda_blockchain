@@ -1,10 +1,9 @@
 use crate::load_credits;
 use crate::validator;
-use crate::vm;
+use crate::vm::{self, VerifyingKeyMap};
 use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
 use log::debug;
-use rand;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -34,10 +33,12 @@ impl Transaction {
     ) -> Result<Self> {
         let program_string = fs::read_to_string(path)?;
         debug!("Deploying program {}", program_string);
-        let program = vm::generate_program(&program_string)?;
 
         // generate program keys (proving and verifying) and keep the verifying one for the deploy
-        let verifying_keys = vm::synthesize_program_keys(&program)?
+        let (program, program_build) = vm::build_program(&program_string)?;
+
+        let verifying_keys = program_build
+            .map
             .into_iter()
             .map(|(i, keys)| (i, keys.1))
             .collect();
@@ -48,7 +49,9 @@ impl Transaction {
             id: "not known yet".to_string(),
             fee,
             program: Box::new(program),
-            verifying_keys,
+            verifying_keys: VerifyingKeyMap {
+                map: verifying_keys,
+            },
         }
         .set_hashed_id()
     }
@@ -57,21 +60,11 @@ impl Transaction {
     pub fn execution(
         program: vm::Program,
         function_name: vm::Identifier,
-        inputs: &[vm::Value],
+        inputs: &[vm::UserInputValueType],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let rng = &mut rand::thread_rng();
-
-        let (proving_key, _) = vm::synthesize_function_keys(&program, rng, &function_name)?;
-        let mut transitions = vm::execution(
-            program,
-            function_name,
-            inputs,
-            private_key,
-            rng,
-            proving_key,
-        )?;
+        let mut transitions = vm::execution(program, function_name, inputs, private_key)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -88,12 +81,14 @@ impl Transaction {
     }
 
     pub fn credits_execution(
-        function_name: &str,
-        inputs: &[vm::Value],
+        function_name: vm::Identifier,
+        inputs: &[vm::UserInputValueType],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let mut transitions = Self::execute_credits(function_name, inputs, private_key)?;
+        let program = vm::Program::credits()?;
+
+        let mut transitions = vm::execution(program, function_name, inputs, private_key)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -117,19 +112,38 @@ impl Transaction {
     }
 
     pub fn output_records(&self) -> Vec<(vm::Field, vm::EncryptedRecord)> {
-        self.transitions()
+        #[cfg(feature = "snarkvm_backend")]
+        return self
+            .transitions()
             .iter()
             .flat_map(|transition| transition.output_records())
             .map(|(commitment, record)| (*commitment, record.clone()))
-            .collect()
+            .collect();
+
+        #[cfg(feature = "vmtropy_backend")]
+        return self
+            .transitions()
+            .iter()
+            .flat_map(|transition| transition.output_records())
+            .map(|(commitment, record)| (commitment, record))
+            .collect();
     }
 
     /// If the transaction is an execution, return the list of input record serial numbers
     pub fn record_serial_numbers(&self) -> Vec<vm::Field> {
-        self.transitions()
+        #[cfg(feature = "snarkvm_backend")]
+        return self
+            .transitions()
             .iter()
-            .flat_map(|transition| transition.serial_numbers().cloned())
-            .collect()
+            .flat_map(|transition| transition.serial_numbers().copied())
+            .collect();
+
+        #[cfg(feature = "vmtropy_backend")]
+        return self
+            .transitions()
+            .iter()
+            .flat_map(|transition| transition.serial_numbers())
+            .collect();
     }
 
     fn transitions(&self) -> Vec<vm::Transition> {
@@ -222,9 +236,22 @@ impl Transaction {
             }
 
             let gates = gates as i64 - implicit_fee;
+            #[cfg(feature = "vmtropy_backend")]
             let inputs = [
-                vm::Value::Record(record),
-                vm::Value::from_str(&format!("{gates}u64"))?,
+                vm::UserInputValueType::Record(crate::vm::Record {
+                    owner: record.owner,
+                    gates: record.gates,
+                    data: record.data,
+                    nonce: record.nonce,
+                }),
+                // TODO: Revisit the cast below.
+                vm::UserInputValueType::U64(gates as u64),
+            ];
+
+            #[cfg(feature = "snarkvm_backend")]
+            let inputs = [
+                vm::UserInputValueType::Record(record),
+                vm::UserInputValueType::from_str(&format!("{gates}u64"))?,
             ];
 
             let transitions = Self::execute_credits("fee", &inputs, private_key)?;
@@ -236,24 +263,13 @@ impl Transaction {
 
     fn execute_credits(
         function: &str,
-        inputs: &[vm::Value],
+        inputs: &[vm::UserInputValueType],
         private_key: &vm::PrivateKey,
     ) -> Result<Vec<vm::Transition>> {
-        let rng = &mut rand::thread_rng();
         let function = vm::Identifier::from_str(function)?;
-        let (program, keys) = load_credits();
-        let (proving_key, _) = keys
-            .get(&function)
-            .ok_or_else(|| anyhow!("credits function not found"))?;
+        let (program, _keys) = load_credits();
 
-        vm::execution(
-            program,
-            function,
-            inputs,
-            private_key,
-            rng,
-            proving_key.clone(),
-        )
+        vm::execution(program, function, inputs, private_key)
     }
 
     /// Verify that the transaction id is consistent with its contents, by checking it's sha256 hash.
@@ -295,9 +311,9 @@ impl Transaction {
             } => {
                 hasher.update(program.id().to_string());
 
-                for (key, value) in verifying_keys.into_iter() {
+                for (key, value) in verifying_keys.map.clone().into_iter() {
                     hasher.update(key.to_string());
-                    hasher.update(serde_json::to_string(value)?);
+                    hasher.update(serde_json::to_string(&value)?);
                 }
 
                 if let Some(fee) = fee {
@@ -386,8 +402,7 @@ impl std::fmt::Display for Transaction {
             }
             Transaction::Execution { id, transitions } => {
                 let transition = transitions.first().unwrap();
-                let program_id = transition.program_id();
-                write!(f, "Execution({program_id},{id})")
+                write!(f, "Execution({},{id})", transition.program_id())
             }
         }
     }

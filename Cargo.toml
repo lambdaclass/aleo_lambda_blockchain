@@ -62,16 +62,23 @@ cfg-if = "1"
 
 [dependencies.vmtropy]
 git = "ssh://git@github.com/lambdaclass/VMtropy.git"
-branch = "main"
+branch = "integration"
 optional = true
 
 [dependencies.snarkvm]
 git = "https://github.com/lambdaclass/snarkVM.git"
 branch = "entropy_fork"
 features = ["circuit", "console", "parallel", "parameters"]
+optional = true
 
 [dev-dependencies]
 assert_fs = "1.0.9"
 assert_cmd = "2.0.6"
 retry = "2.0.0"
 ctor = "0.1.23"
+
+[features]
+default = ["snarkvm_backend"]
+# default = ["vmtropy_backend"]
+snarkvm_backend = ["snarkvm"]
+vmtropy_backend = ["vmtropy"]

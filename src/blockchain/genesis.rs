@@ -28,6 +28,7 @@ pub struct Cli {
 fn main() -> Result<()> {
     let cli: Cli = Cli::parse();
 
+    // update the genesis JSON with the calculated app state
     let genesis_path = cli
         .node_dirs
         .first()
@@ -58,6 +59,7 @@ fn main() -> Result<()> {
         let aleo_account: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(aleo_account_path)?)?;
         let aleo_address = aleo_account["address"].as_str().unwrap();
+        let aleo_view_key = aleo_account["view_key"].as_str().unwrap();
 
         let tmint_account_path = node_dir.join("config/priv_validator_key.json");
         let tmint_account: serde_json::Value =
@@ -70,14 +72,15 @@ fn main() -> Result<()> {
 
         println!("Generating record for {aleo_address}");
         // NOTE: using a hardcoded seed, not for production!
-        let seed = 123;
-        let record = vm::mint_record(
+        #[allow(unused_mut)]
+        let mut record = vm::mint_record(
             "credits.aleo",
             "credits",
             &validator.aleo_address,
             cli.amount,
-            seed,
+            1234,
         )?;
+
         genesis_records.push(record);
         validators.push(validator);
     }

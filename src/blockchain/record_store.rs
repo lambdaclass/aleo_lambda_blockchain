@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use lib::vm::{EncryptedRecord, Field};
+use lib::vm::{self, EncryptedRecord, Field};
 use log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use std::collections::{HashMap, HashSet};
@@ -19,7 +19,7 @@ type Value = Vec<u8>;
 /// Internal channel reply for the scan command
 type ScanReply = (Vec<(Key, Value)>, Option<Key>);
 /// Public return type for the scan command.
-type ScanResult = (Vec<(Commitment, EncryptedRecord)>, Option<SerialNumber>);
+type ScanResult = (Vec<(Commitment, vm::EncryptedRecord)>, Option<SerialNumber>);
 
 /// The record store tracks the known unspent and spent record sets (similar to bitcoin's UTXO set)
 /// according to the transactions that are committed to the ledger.
@@ -180,7 +180,7 @@ impl RecordStore {
     }
 
     /// Saves a new unspent record to the write buffer
-    pub fn add(&self, commitment: Commitment, record: EncryptedRecord) -> Result<()> {
+    pub fn add(&self, commitment: Commitment, record: vm::EncryptedRecord) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         let commitment = commitment.to_string().into_bytes();
@@ -236,7 +236,9 @@ impl RecordStore {
             .map(|(commitment, record)| {
                 let commitment =
                     Commitment::from_str(&String::from_utf8_lossy(commitment)).unwrap();
+
                 let record = EncryptedRecord::from_str(&String::from_utf8_lossy(record)).unwrap();
+
                 (commitment, record)
             })
             .collect();
@@ -263,13 +265,15 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use lib::vm::{self, PrivateKey};
+    use std::fs;
 
-    use snarkvm::prelude::{Identifier, Network, ProgramID, Testnet3, Uniform};
+    #[allow(unused_imports)]
+    use indexmap::IndexMap;
+    #[allow(unused_imports)]
+    use lib::vm::{compute_serial_number, PrivateKey, Record, ViewKey};
+    type PublicRecord = lib::vm::Record;
 
     use super::*;
-    use std::{fs, str::FromStr};
-    type PublicRecord = lib::vm::Record;
 
     #[ctor::ctor]
     fn init() {
@@ -311,13 +315,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn no_double_add_record() {
         let store = RecordStore::new(&db_path("records2")).unwrap();
 
         let (record, commitment, _) = new_record();
-        store.add(commitment, record.clone()).unwrap();
+        store.add(commitment.clone(), record.clone()).unwrap();
         let msg = store
-            .add(commitment, record)
+            .add(commitment.clone(), record)
             .unwrap_err()
             .root_cause()
             .to_string();
@@ -325,10 +330,10 @@ mod tests {
         store.commit().unwrap();
 
         let (record, commitment, _) = new_record();
-        store.add(commitment, record.clone()).unwrap();
+        store.add(commitment.clone(), record.clone()).unwrap();
         store.commit().unwrap();
         let msg = store
-            .add(commitment, record)
+            .add(commitment.clone(), record)
             .unwrap_err()
             .root_cause()
             .to_string();
@@ -413,7 +418,29 @@ mod tests {
 
     // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
 
+    #[cfg(feature = "vmtropy_backend")]
     fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
+        use vmtropy::snarkvm::prelude::{Scalar, Uniform};
+
+        let address =
+            String::from("aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry");
+        let mut record = Record::new_from_aleo_address(address, 5, IndexMap::new(), None);
+
+        let private_key = PrivateKey::new(&mut rand::thread_rng()).unwrap();
+        let rng = &mut rand::thread_rng();
+        let randomizer = Scalar::rand(rng);
+        let record_ciphertext = record.encrypt(randomizer).unwrap();
+        let commitment = record.commitment().unwrap();
+        let serial_number = compute_serial_number(private_key, commitment.clone()).unwrap();
+
+        (record_ciphertext, commitment, serial_number)
+    }
+
+    #[cfg(feature = "snarkvm_backend")]
+    fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
+        use lib::vm::{Identifier, ProgramID};
+        use snarkvm::prelude::{Network, Testnet3, Uniform};
+
         let rng = &mut rand::thread_rng();
         let randomizer = Uniform::rand(rng);
         let nonce = Testnet3::g_scalar_multiply(&randomizer);
