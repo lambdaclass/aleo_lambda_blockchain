@@ -182,11 +182,11 @@ impl Transaction {
 
                     // TODO: Factor out the following extraction and test it as with the original conversion
 
-                    let validator_key: [u64;4] = [
+                    let validator_key: [u64; 4] = [
                         vm::int_from_output(extract_output(4)?)?,
                         vm::int_from_output(extract_output(5)?)?,
                         vm::int_from_output(extract_output(6)?)?,
-                        vm::int_from_output(extract_output(7)?)?
+                        vm::int_from_output(extract_output(7)?)?,
                     ];
 
                     let validator = Transaction::validator_key_from_u64s(&validator_key)?;
@@ -348,7 +348,10 @@ impl Transaction {
             "Input validator address is not 32 bytes long"
         );
 
-        let sections: Vec<u64> = bytes.chunks_exact(8).map(|x| u64::from_be_bytes(x.try_into().expect("error converting address into u64s"))).collect();
+        let sections: Vec<u64> = bytes
+            .chunks_exact(8)
+            .map(|x| u64::from_be_bytes(x.try_into().expect("error converting address into u64s")))
+            .collect();
 
         ensure!(
             sections.len() == 4,
@@ -367,7 +370,10 @@ impl Transaction {
             "Input validator address does not have 4 sections"
         );
 
-        let sections = sections.into_iter().flat_map(|x| x.to_be_bytes()).collect_vec();
+        let sections = sections
+            .into_iter()
+            .flat_map(|x| x.to_be_bytes())
+            .collect_vec();
         Ok(base64::encode(&sections))
     }
 }
@@ -402,17 +408,20 @@ mod tests {
         assert!(Transaction::validator_key_from_u128s(h, l).unwrap() == pub_key);
     }
 
-
     #[test]
     fn convert_validator_address_u64() {
         let pub_key = "KvYujhwQVoCOH1B3FrmtjSN5GgKUjarOKDNIbWfA8hc=";
         let key_encoded = base64::decode(pub_key).unwrap();
         let key_sections = Transaction::validator_key_as_u64s(&key_encoded).unwrap();
 
-        let expected_slice = [3095712981754861184u64, 10240992550076394893u64, 2556102861894036174u64, 2896738620058694167u64]; 
+        let expected_slice = [
+            3095712981754861184u64,
+            10240992550076394893u64,
+            2556102861894036174u64,
+            2896738620058694167u64,
+        ];
 
         assert_eq!(key_sections, expected_slice);
         assert!(Transaction::validator_key_from_u64s(&key_sections).unwrap() == pub_key);
-
     }
 }

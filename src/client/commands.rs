@@ -319,7 +319,7 @@ impl Command {
                     fee,
                     fee_record,
                 }) => {
-                    let validator_split=
+                    let validator_split =
                         Transaction::validator_key_as_u64s(&base64::decode(validator)?)?;
 
                     let inputs = [
@@ -328,7 +328,7 @@ impl Command {
                         vm::u64_to_value(validator_split[0]),
                         vm::u64_to_value(validator_split[1]),
                         vm::u64_to_value(validator_split[2]),
-                        vm::u64_to_value(validator_split[3])
+                        vm::u64_to_value(validator_split[3]),
                     ];
 
                     run_credits_command(&credentials, &url, "stake", &inputs, &fee, &fee_record)
