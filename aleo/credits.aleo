@@ -56,7 +56,7 @@ function stake:
     input r4 as u64.public;
     input r5 as u64.public;
     sub r0.gates r1 into r6;
-    cast r0.owner r4 into r7 as credits.record;
+    cast r0.owner r6 into r7 as credits.record;
     cast r0.owner r1 r2 r3 r4 r5 into r8 as staked_credits.record;
     add 0u64 r1 into r9;
     output r7 as credits.record;
