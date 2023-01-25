@@ -8,6 +8,7 @@ use sha3::{Digest, Sha3_256};
 pub use vmtropy::build_program;
 pub use vmtropy::jaleo::{get_credits_key, mint_credits};
 pub use vmtropy::jaleo::{Itertools, UserInputValueType};
+use vmtropy::snarkvm::prelude::FromBytes;
 use vmtropy::VariableType;
 
 const MAX_INPUTS: usize = 8;
@@ -247,4 +248,37 @@ pub fn mint_record(
     // and encrypt the record. Once again, we don't really do things that way for now.
 
     mint_credits(owner_address, gates, seed)
+}
+
+/// Matches types of literals (that we know are numbers) and turns them into u128 before trying to downcast to the desired type
+pub fn int_from_output<T: std::convert::TryFrom<u128>>(output: &VariableType) -> Result<T>
+where
+    <T as TryFrom<u128>>::Error: std::fmt::Debug,
+{
+    if let VariableType::Public(user_input_value_type) = output {
+        let value = match user_input_value_type {
+            UserInputValueType::U8(v) => *v as u128,
+            UserInputValueType::U16(v) => *v as u128,
+            UserInputValueType::U32(v) => *v as u128,
+            UserInputValueType::U64(v) => *v as u128,
+            UserInputValueType::U128(v) => *v as u128,
+            _ => todo!(),
+        };
+        return Ok(T::try_from(value).expect("issue casting literal to desired type"));
+    };
+    bail!("output type extraction not supported");
+}
+
+// same as above
+pub fn address_from_output(output: &VariableType) -> Result<Address> {
+    if let VariableType::Public(UserInputValueType::Address(address)) = output {
+        let address = Address::from_bytes_le(address)?;
+        return Ok(address);
+    };
+
+    bail!("output type extraction not supported");
+}
+
+pub fn u64_to_value(amount: u64) -> UserInputValueType {
+    UserInputValueType::from_str(&format!("{amount}u64")).expect("couldn't parse amount")
 }

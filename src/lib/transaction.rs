@@ -313,11 +313,15 @@ impl Transaction {
 
                 for (key, value) in verifying_keys.map.clone().into_iter() {
                     hasher.update(key.to_string());
-                    hasher.update(serde_json::to_string(&value)?);
+                    #[cfg(feature = "snarkvm_backend")]
+                    let serialization = serde_json::to_string(&value)?;
+                    #[cfg(feature = "vmtropy_backend")]
+                    let serialization = vmtropy::serialize_verifying_key(value)?;
+                    hasher.update(serialization);
                 }
 
                 if let Some(fee) = fee {
-                    hasher.update(fee.to_string());
+                    hasher.update(serde_json::to_string(fee)?);
                 }
             }
             Transaction::Execution {

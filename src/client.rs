@@ -114,6 +114,7 @@ async fn run(command: Command, url: String) -> Result<serde_json::Value> {
                 account::Credentials::load().map_err(|_| anyhow!("credentials not found"))?;
 
             let transaction = generate_execution(&path, function, &inputs, &credentials)?;
+            println!("{transaction}");
             broadcast_to_blockchain(&transaction, &url).await?;
             json!(transaction)
         }

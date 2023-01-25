@@ -7,6 +7,7 @@ use assert_fs::NamedTempFile;
 use rand::Rng;
 use retry::{self, delay::Fixed};
 use serde::de::DeserializeOwned;
+use serial_test::serial;
 use std::str;
 use std::{collections::HashMap, fs};
 
@@ -259,6 +260,7 @@ fn token_transaction() {
 }
 
 #[test]
+#[serial(records)]
 fn consume_records() {
     // new account41
     let (_acc_file, home_path, _) = &new_account();
@@ -285,15 +287,14 @@ fn consume_records() {
         .unwrap();
 
     // Get the mint record
-    let transaction = retry_command(home_path, &["get", transaction_id]).unwrap();
+    let transaction = retry_command(home_path, &["get", transaction_id.clone()]).unwrap();
     let record = get_encrypted_record(&transaction);
 
     // execute consume with output record
     execute_program(home_path, &program_path, CONSUME_FUNCTION, &[record]).unwrap();
 
     // execute consume with same output record, execution fails, no double spend
-    let error = execute_program(home_path, &program_path, CONSUME_FUNCTION, &[record]).unwrap_err();
-
+    let error = execute_program(home_path, &program_path, "consume_b", &[record]).unwrap_err();
     assert!(error.contains("is unknown or already spent"));
 
     // create a fake record
@@ -355,6 +356,7 @@ fn try_create_credits() {
 }
 
 #[test]
+#[serial(records)]
 fn transfer_credits() {
     let validator_home = validator_account_path();
 
@@ -399,6 +401,7 @@ fn transfer_credits() {
 }
 
 #[test]
+#[serial(records)]
 fn transaction_fees() {
     // create a test account
     let (_tempfile, receiver_home, credentials) = &new_account();
@@ -779,6 +782,7 @@ fn unique_id() -> String {
 /// Extract the command assert output and deserialize it as json
 fn parse_output<T: DeserializeOwned>(result: Assert) -> T {
     let output = String::from_utf8(result.get_output().stdout.to_vec()).unwrap();
+    println!("{output}");
     serde_json::from_str(&output).unwrap()
 }
 
