@@ -620,7 +620,7 @@ fn staking() {
     assert_balance(&receiver_home, 50).unwrap();
 
     #[cfg(feature = "snarkvm_backend")]
-    let user_record = client_command(receiver_home, &["account", "records"])
+    let user_record = client_command(&receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
         .unwrap()

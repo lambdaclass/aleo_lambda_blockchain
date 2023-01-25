@@ -367,6 +367,7 @@ pub fn u64_to_value(amount: u64) -> UserInputValueType {
     UserInputValueType::from_str(&format!("{amount}u64")).expect("couldn't parse amount")
 }
 
+#[allow(non_snake_case)]
 pub fn u128_to_UserInputValueType(amount: u128) -> UserInputValueType {
     UserInputValueType::from_str(&format!("{amount}u128")).expect("couldn't parse amount")
 }
