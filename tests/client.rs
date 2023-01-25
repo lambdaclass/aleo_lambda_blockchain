@@ -671,7 +671,6 @@ fn staking() {
         ],
     )
     .unwrap_err();
-    println!("erroris {error}");
 
     assert!(error.contains("attempted to apply a staking update on a different aleo account"));
 
