@@ -267,13 +267,11 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 mod tests {
     use std::fs;
 
+    use super::*;
     #[allow(unused_imports)]
     use indexmap::IndexMap;
     #[allow(unused_imports)]
     use lib::vm::{compute_serial_number, PrivateKey, Record, ViewKey};
-    type PublicRecord = lib::vm::Record;
-
-    use super::*;
 
     #[ctor::ctor]
     fn init() {

@@ -134,7 +134,6 @@ pub fn verify_execution(
         .map
         .get(&transition.function_name)
         .ok_or_else(|| anyhow!("missing verifying key"))?;
-
     // Decode and deserialize the proof.
     let proof_bytes = hex::decode(&transition.proof)?;
 
@@ -155,6 +154,7 @@ pub fn verify_execution(
         vmtropy::verify_proof(verifying_key.clone(), &inputs, &proof)?,
         "Transition is invalid"
     );
+
     Ok(())
 }
 
@@ -168,12 +168,12 @@ pub fn generate_program(program_string: &str) -> Result<Program> {
     Program::from_str(program_string)
 }
 
-// The _rng and _key arguments are here just to be compliant with the snarkVM API, we don't actually use them.
 pub fn execution(
     program: Program,
     function_name: Identifier,
     inputs: &[UserInputValueType],
     private_key: &PrivateKey,
+    _proving_key: Option<ProvingKey>,
 ) -> Result<Vec<Transition>> {
     ensure!(
         !program_is_coinbase(&program.id().to_string(), &function_name.to_string()),
@@ -255,24 +255,34 @@ pub fn int_from_output<T: std::convert::TryFrom<u128>>(output: &VariableType) ->
 where
     <T as TryFrom<u128>>::Error: std::fmt::Debug,
 {
-    if let VariableType::Public(user_input_value_type) = output {
-        let value = match user_input_value_type {
-            UserInputValueType::U8(v) => *v as u128,
-            UserInputValueType::U16(v) => *v as u128,
-            UserInputValueType::U32(v) => *v as u128,
-            UserInputValueType::U64(v) => *v as u128,
-            UserInputValueType::U128(v) => *v as u128,
-            _ => todo!(),
-        };
-        return Ok(T::try_from(value).expect("issue casting literal to desired type"));
+    match output {
+        VariableType::Private(user_input_value_type)
+        | VariableType::Public(user_input_value_type) => {
+            let value = match user_input_value_type {
+                UserInputValueType::U8(v) => *v as u128,
+                UserInputValueType::U16(v) => *v as u128,
+                UserInputValueType::U32(v) => *v as u128,
+                UserInputValueType::U64(v) => *v as u128,
+                UserInputValueType::U128(v) => *v as u128,
+                _ => todo!(),
+            };
+            return Ok(T::try_from(value).expect("issue casting literal to desired type"));
+        }
+        _ => {
+            bail!("output type extraction not supported");
+        }
     };
-    bail!("output type extraction not supported");
 }
 
 // same as above
 pub fn address_from_output(output: &VariableType) -> Result<Address> {
     if let VariableType::Public(UserInputValueType::Address(address)) = output {
         let address = Address::from_bytes_le(address)?;
+        return Ok(address);
+    };
+
+    if let VariableType::Private(UserInputValueType::Address(address)) = output {
+        let address = Address::from_str(&String::from_utf8(address.to_vec())?)?;
         return Ok(address);
     };
 

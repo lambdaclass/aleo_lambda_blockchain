@@ -40,7 +40,7 @@ pub type ProvingKey = snarkvm::prelude::ProvingKey<Testnet3>;
 pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Transition = snarkvm::prelude::Transition<Testnet3>;
 
-/// This struct is nothing more than a wrapper around the actual IndexMap that is used
+/// These structs are nothing more than a wrapper around the actual IndexMap that is used
 /// for the verifying keys map. Why does it exist? The problem comes from the vmtropy backend.
 /// Arkworks' verifying keys do not implement the regular `Serialize`/`Deserialize` traits,
 /// as they use their own custom `CanonicalSerialize`/`CanonicalDeserialize` ones. To implement
@@ -238,6 +238,7 @@ pub fn execution(
     function_name: Identifier,
     inputs: &[UserInputValueType],
     private_key: &PrivateKey,
+    proving_key: Option<ProvingKey>,
 ) -> Result<Vec<Transition>> {
     ensure!(
         !Program::is_coinbase(program.id(), &function_name),
@@ -257,9 +258,14 @@ pub fn execution(
     let rng = &mut rand::thread_rng();
 
     let stack = stack::new_init(&program)?;
-    let (proving_key, _verifying_key) = synthesize_function_keys(&program, rng, &function_name)?;
 
-    stack.insert_proving_key(&function_name, proving_key)?;
+    if let Some(proving_key) = proving_key {
+        stack.insert_proving_key(&function_name, proving_key)?;
+    } else {
+        let (proving_key, _verifying_key) =
+            synthesize_function_keys(&program, rng, &function_name)?;
+        stack.insert_proving_key(&function_name, proving_key)?;
+    }
 
     let authorization = stack.authorize::<AleoV0, _>(private_key, function_name, inputs, rng)?;
     let execution: Arc<RwLock<RawRwLock, _>> = Arc::new(RwLock::new(Execution::new()));

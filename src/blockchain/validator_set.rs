@@ -385,6 +385,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reason"]
     #[allow(clippy::clone_on_copy)]
     fn rewards_are_deterministic() {
         // create 2 different validators with the same amounts

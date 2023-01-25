@@ -326,6 +326,9 @@ fn try_create_credits() {
     let credits_path = "aleo/credits.aleo";
 
     // test that executing the mint function fails
+
+    // NOTE: mint function is currently missing from credits.aleo,
+    // but the check is hardcoded so this test stands
     let output = execute_program(
         home_path,
         credits_path,
@@ -338,21 +341,22 @@ fn try_create_credits() {
 
     // These checks don't make sense when using VMtropy because there are no
     // checks for which program you can call.
-    #[cfg(feature = "snarkvm_backend")]
-    let (_program_file, program_path, _) = load_program("credits");
-    #[cfg(feature = "snarkvm_backend")]
+    let (_program_file, program_path, _) = load_program("records");
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
-    #[cfg(feature = "snarkvm_backend")]
     let output = execute_program(
         home_path,
         &program_path,
         "mint_credits",
         &["100u64", "%account"],
-    )
-    .err()
-    .unwrap();
+    );
+
+    #[cfg(feature = "vmtropy_backend")]
+    output.unwrap();
     #[cfg(feature = "snarkvm_backend")]
-    assert!(output.contains("is not satisfied on the given inputs"));
+    assert!(output
+        .err()
+        .unwrap()
+        .contains("is not satisfied on the given inputs"));
 }
 
 #[test]
@@ -574,11 +578,9 @@ fn transaction_fees() {
 }
 
 #[test]
-// TODO: Fix this when we properly implement encryption on the VMtropy side
-#[cfg(feature = "snarkvm_backend")]
 fn staking() {
     // create a test account
-    let (_tempfile, receiver_home, credentials) = &new_account();
+    let (_tempfile, receiver_home, credentials) = new_account();
 
     // transfer a known amount of credits to the test account
     let validator_home = validator_account_path();
@@ -615,8 +617,9 @@ fn staking() {
     )
     .unwrap();
 
-    assert_balance(receiver_home, 50).unwrap();
+    assert_balance(&receiver_home, 50).unwrap();
 
+    #[cfg(feature = "snarkvm_backend")]
     let user_record = client_command(receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
@@ -625,9 +628,20 @@ fn staking() {
         .unwrap()
         .to_string();
 
+    #[cfg(feature = "vmtropy_backend")]
+    let user_record = client_command(&receiver_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .get("ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
     // try to stake more than available, fail
     let error = client_command(
-        receiver_home,
+        &receiver_home,
         &[
             "credits",
             "stake",
@@ -639,13 +653,15 @@ fn staking() {
     .unwrap_err();
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
     // this should be improved to properly handle execution errors internally and showing a clear error message in the CLI
-    assert!(error.contains("Integer subtraction failed"));
+    assert!(
+        error.contains("Integer subtraction failed") || error.contains("Subtraction underflow")
+    );
 
     // TODO add check: try to stake for an unexistent validator, fail
 
     // stake all available, but fail because this is not the expected aleo account
     let error = client_command(
-        receiver_home,
+        &receiver_home,
         &[
             "credits",
             "stake",
@@ -655,11 +671,25 @@ fn staking() {
         ],
     )
     .unwrap_err();
+    println!("erroris {error}");
+
     assert!(error.contains("attempted to apply a staking update on a different aleo account"));
 
+    #[cfg(feature = "snarkvm_backend")]
     let validator_record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    #[cfg(feature = "vmtropy_backend")]
+    let validator_record = client_command(&validator_home, &["account", "records"])
+        .unwrap()
+        .pointer("/0/ciphertext")
+        .unwrap()
+        .get("ciphertext")
         .unwrap()
         .as_str()
         .unwrap()
@@ -678,12 +708,19 @@ fn staking() {
     )
     .unwrap();
 
+    #[cfg(feature = "snarkvm_backend")]
     let staked_credits_record = transaction
         .pointer("/Execution/transitions/0/outputs/1/value")
         .unwrap()
         .as_str()
         .unwrap();
 
+    #[cfg(feature = "vmtropy_backend")]
+    let staked_credits_record = transaction
+        .pointer("/Execution/transitions/0/outputs/1/EncryptedRecord/1/ciphertext")
+        .unwrap()
+        .as_str()
+        .unwrap();
     // try to unstake more than available, fail
     let error = client_command(
         &validator_home,
@@ -692,7 +729,9 @@ fn staking() {
     .unwrap_err();
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
     // this should be improved to properly handle execution errors internally and showing a clear error message in the CLI
-    assert!(error.contains("Integer subtraction failed"));
+    assert!(
+        error.contains("Integer subtraction failed") || error.contains("Subtraction underflow")
+    );
 
     // unstake all available
     client_command(
@@ -782,7 +821,6 @@ fn unique_id() -> String {
 /// Extract the command assert output and deserialize it as json
 fn parse_output<T: DeserializeOwned>(result: Assert) -> T {
     let output = String::from_utf8(result.get_output().stdout.to_vec()).unwrap();
-    println!("{output}");
     serde_json::from_str(&output).unwrap()
 }
 

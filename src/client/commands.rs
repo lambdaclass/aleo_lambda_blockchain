@@ -45,9 +45,7 @@ pub enum Credits {
         input_record: vm::UserInputValueType,
         #[clap(value_parser=parse_input_value)]
         recipient_address: vm::UserInputValueType,
-        #[cfg(feature = "snarkvm_backend")]
-        amount: u64,
-        #[cfg(feature = "vmtropy_backend")]
+        #[clap()]
         amount: u64,
         /// Amount of gates to pay as fee for this execution. If omitted not fee is paid.
         #[clap(long)]
@@ -390,16 +388,6 @@ impl Command {
             .filter_map(|(_commitment, record)| record.decrypt(&credentials.view_key).ok())
             .collect()
     }
-}
-
-#[cfg(feature = "vmtropy_backend")]
-fn u64_to_value(amount: u64) -> vm::UserInputValueType {
-    vm::UserInputValueType::U64(amount)
-}
-
-#[cfg(feature = "snarkvm_backend")]
-fn u64_to_value(amount: u64) -> vm::UserInputValueType {
-    vm::UserInputValueType::from_str(&format!("{amount}u64")).expect("couldn't parse amount")
 }
 
 async fn run_credits_command(

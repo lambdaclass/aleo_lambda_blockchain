@@ -19,11 +19,11 @@ pub fn aleo_home() -> PathBuf {
 pub fn load_credits() -> (vm::Program, vm::ProgramBuild) {
     // try to fetch from cache
     let cache_path = aleo_home().join("cache/credits.avm");
-    if let Ok(program) = program_file::ProgramFile::load(&cache_path) {
-        log::debug!("found credits program in {cache_path:?}");
-        return program;
-    }
-
+    //if let Ok(program) = program_file::ProgramFile::load(&cache_path) {
+    //    log::debug!("found credits program in {cache_path:?}");
+    //    return program;
+    //}
+    //
     // else build keys and cache for future use
     log::debug!("cached credits not found, building and saving to {cache_path:?}");
     let source = include_str!("../../aleo/credits.aleo");

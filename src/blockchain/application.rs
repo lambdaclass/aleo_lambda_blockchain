@@ -332,8 +332,6 @@ impl SnarkVMApp {
     /// or they aren't known to be unspent either in the ledger or in an unconfirmed transaction output
     fn check_inputs_are_unspent(&self, transaction: &Transaction) -> Result<()> {
         let serial_numbers = transaction.record_serial_numbers();
-        println!("{:?}", serial_numbers);
-
         let already_spent = serial_numbers
             .iter()
             .find(|serial_number| !self.records.is_unspent(serial_number).unwrap_or(true));
@@ -378,6 +376,7 @@ impl SnarkVMApp {
             .stake_updates()?
             .into_iter()
             .for_each(|update| validator_set.apply(update));
+
         Ok(())
     }
 

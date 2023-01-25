@@ -64,7 +64,7 @@ impl Transaction {
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let mut transitions = vm::execution(program, function_name, inputs, private_key)?;
+        let mut transitions = vm::execution(program, function_name, inputs, private_key, None)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -86,9 +86,8 @@ impl Transaction {
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let program = vm::Program::credits()?;
-
-        let mut transitions = vm::execution(program, function_name, inputs, private_key)?;
+        let mut transitions =
+            Self::execute_credits(&function_name.to_string(), inputs, private_key)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -267,9 +266,19 @@ impl Transaction {
         private_key: &vm::PrivateKey,
     ) -> Result<Vec<vm::Transition>> {
         let function = vm::Identifier::from_str(function)?;
-        let (program, _keys) = load_credits();
+        let (program, keys) = load_credits();
+        let (proving_key, _) = keys
+            .map
+            .get(&function)
+            .ok_or_else(|| anyhow!("credits function not found"))?;
 
-        vm::execution(program, function, inputs, private_key)
+        vm::execution(
+            program,
+            function,
+            inputs,
+            private_key,
+            Some(proving_key.clone()),
+        )
     }
 
     /// Verify that the transaction id is consistent with its contents, by checking it's sha256 hash.
