@@ -62,9 +62,8 @@ cfg-if = "1"
 serial_test = "*"
 
 [dependencies.vmtropy]
-#git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
-path = "../aleo_vm_lambda"
-# branch = "integration"
+git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
+branch = "integration"
 optional = true
 
 [dependencies.snarkvm]
