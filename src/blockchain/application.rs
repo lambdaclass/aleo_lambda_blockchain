@@ -116,8 +116,7 @@ impl Application for SnarkVMApp {
     /// mempool and relaying it to other nodes.
     fn check_tx(&self, request: abci::RequestCheckTx) -> abci::ResponseCheckTx {
         let tx: Transaction = bincode::deserialize(&request.tx).unwrap();
-
-        info!("Check Tx {}", tx.id());
+        info!("Check Tx ID: {}", tx.id());
 
         let result = self
             .check_no_duplicate_records(&tx)

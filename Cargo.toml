@@ -80,7 +80,7 @@ retry = "2.0.0"
 ctor = "0.1.23"
 
 [features]
-default = ["snarkvm_backend"]
-#default = ["vmtropy_backend"]
+#default = ["snarkvm_backend"]
+default = ["vmtropy_backend"]
 snarkvm_backend = ["snarkvm"]
 vmtropy_backend =  ["vmtropy"]

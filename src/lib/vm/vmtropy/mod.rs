@@ -251,6 +251,7 @@ pub fn mint_record(
 }
 
 /// Matches types of literals (that we know are numbers) and turns them into u128 before trying to downcast to the desired type
+// TODO: Once https://trello.com/c/vtHu588B/77-handle-inputs-and-outputs-visibility-encryption is merged, fix this
 pub fn int_from_output<T: std::convert::TryFrom<u128>>(output: &VariableType) -> Result<T>
 where
     <T as TryFrom<u128>>::Error: std::fmt::Debug,

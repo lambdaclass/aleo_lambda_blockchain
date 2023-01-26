@@ -59,7 +59,6 @@ fn main() -> Result<()> {
         let aleo_account: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(aleo_account_path)?)?;
         let aleo_address = aleo_account["address"].as_str().unwrap();
-        let _aleo_view_key = aleo_account["view_key"].as_str().unwrap();
 
         let tmint_account_path = node_dir.join("config/priv_validator_key.json");
         let tmint_account: serde_json::Value =

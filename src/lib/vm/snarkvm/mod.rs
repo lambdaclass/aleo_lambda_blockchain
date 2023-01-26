@@ -259,13 +259,11 @@ pub fn execution(
 
     let stack = stack::new_init(&program)?;
 
-    if let Some(proving_key) = proving_key {
-        stack.insert_proving_key(&function_name, proving_key)?;
-    } else {
-        let (proving_key, _verifying_key) =
-            synthesize_function_keys(&program, rng, &function_name)?;
-        stack.insert_proving_key(&function_name, proving_key)?;
-    }
+    let proving_key = match proving_key {
+        Some(v) => v,
+        None => synthesize_function_keys(&program, rng, &function_name)?.0,
+    };
+    stack.insert_proving_key(&function_name, proving_key)?;
 
     let authorization = stack.authorize::<AleoV0, _>(private_key, function_name, inputs, rng)?;
     let execution: Arc<RwLock<RawRwLock, _>> = Arc::new(RwLock::new(Execution::new()));

@@ -339,8 +339,6 @@ fn try_create_credits() {
     .unwrap();
     assert!(output.contains("Coinbase functions cannot be called"));
 
-    // These checks don't make sense when using VMtropy because there are no
-    // checks for which program you can call.
     let (_program_file, program_path, _) = load_program("records");
     client_command(home_path, &["program", "deploy", &program_path]).unwrap();
     let output = execute_program(
@@ -350,12 +348,12 @@ fn try_create_credits() {
         &["100u64", "%account"],
     );
 
+    // TODO: When https://trello.com/c/3CM4OES2/78-make-sure-credits-are-not-being-minted-when-creating-executions is finished, this should return an error when using VMTropy
     #[cfg(feature = "vmtropy_backend")]
     output.unwrap();
     #[cfg(feature = "snarkvm_backend")]
     assert!(output
-        .err()
-        .unwrap()
+        .unwrap_err()
         .contains("is not satisfied on the given inputs"));
 }
 
@@ -585,6 +583,12 @@ fn staking() {
     // transfer a known amount of credits to the test account
     let validator_home = validator_account_path();
     let tendermint_validator = validator_address(&validator_home);
+
+    #[cfg(feature = "snarkvm_backend")]
+    let expected_subtraction_error = "Integer subtraction failed";
+    #[cfg(feature = "vmtropy_backend")]
+    let expected_subtraction_error = "Subtraction underflow";
+
     #[cfg(feature = "snarkvm_backend")]
     let record = client_command(&validator_home, &["account", "records"])
         .unwrap()
@@ -653,9 +657,7 @@ fn staking() {
     .unwrap_err();
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
     // this should be improved to properly handle execution errors internally and showing a clear error message in the CLI
-    assert!(
-        error.contains("Integer subtraction failed") || error.contains("Subtraction underflow")
-    );
+    assert!(error.contains(expected_subtraction_error));
 
     // TODO add check: try to stake for an unexistent validator, fail
 
@@ -727,10 +729,7 @@ fn staking() {
     )
     .unwrap_err();
     // FIXME currently this results in an unexpected failure because of how snarkvm handles integer overflow errors
-    // this should be improved to properly handle execution errors internally and showing a clear error message in the CLI
-    assert!(
-        error.contains("Integer subtraction failed") || error.contains("Subtraction underflow")
-    );
+    assert!(error.contains(expected_subtraction_error));
 
     // unstake all available
     client_command(
