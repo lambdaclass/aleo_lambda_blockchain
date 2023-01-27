@@ -463,8 +463,7 @@ async fn get_records(
                 .ok()
                 .filter(|(_, _ciphertext, _decrypted_record)| {
                     let serial_number = compute_serial_number(credentials.private_key, commitment);
-                    return serial_number.is_ok()
-                        && !spent_records.contains(&serial_number.unwrap());
+                    serial_number.is_ok() && !spent_records.contains(&serial_number.unwrap())
                 })
         })
         .collect();

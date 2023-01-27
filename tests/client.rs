@@ -134,7 +134,7 @@ fn decrypt_records() {
         if #[cfg(feature = "vmtropy_backend")] {
             let expected_amount = "1u64";
             let expected_gates = "0u64";
-            let expected_owner = format!("{address}");
+            let expected_owner = address.to_string();
         } else if #[cfg(feature = "snarkvm_backend")] {
             let expected_amount = "1u64.private";
             let expected_gates = "0u64.private";
@@ -287,7 +287,7 @@ fn consume_records() {
         .unwrap();
 
     // Get the mint record
-    let transaction = retry_command(home_path, &["get", transaction_id.clone()]).unwrap();
+    let transaction = retry_command(home_path, &["get", transaction_id]).unwrap();
     let record = get_encrypted_record(&transaction);
 
     // execute consume with output record
@@ -498,7 +498,7 @@ fn transaction_fees() {
         .to_string();
 
     #[cfg(feature = "vmtropy_backend")]
-    let record = client_command(&receiver_home, &["account", "records"])
+    let record = client_command(receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
         .unwrap()
@@ -526,7 +526,7 @@ fn transaction_fees() {
         .to_string();
 
     #[cfg(feature = "vmtropy_backend")]
-    let record = client_command(&receiver_home, &["account", "records"])
+    let record = client_command(receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
         .unwrap()

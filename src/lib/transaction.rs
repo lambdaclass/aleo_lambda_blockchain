@@ -399,11 +399,8 @@ impl Transaction {
             "Input validator address does not have 4 sections"
         );
 
-        let sections = sections
-            .into_iter()
-            .flat_map(|x| x.to_be_bytes())
-            .collect_vec();
-        Ok(base64::encode(&sections))
+        let sections = sections.iter().flat_map(|x| x.to_be_bytes()).collect_vec();
+        Ok(base64::encode(sections))
     }
 }
 

@@ -264,15 +264,15 @@ where
                 UserInputValueType::U16(v) => *v as u128,
                 UserInputValueType::U32(v) => *v as u128,
                 UserInputValueType::U64(v) => *v as u128,
-                UserInputValueType::U128(v) => *v as u128,
+                UserInputValueType::U128(v) => *v,
                 _ => todo!(),
             };
-            return Ok(T::try_from(value).expect("issue casting literal to desired type"));
+            Ok(T::try_from(value).expect("issue casting literal to desired type"))
         }
         _ => {
             bail!("output type extraction not supported");
         }
-    };
+    }
 }
 
 // same as above
