@@ -180,6 +180,7 @@ impl RecordStore {
     }
 
     /// Saves a new unspent record to the write buffer
+    #[allow(clippy::redundant_clone)] // commitments/serial numbers are strings on VMTropy and so clippy generates a warning for `.to_string()`
     pub fn add(&self, commitment: Commitment, record: vm::EncryptedRecord) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
@@ -218,6 +219,7 @@ impl RecordStore {
     }
 
     /// Return up to `limit` record ciphertexts
+    #[allow(clippy::redundant_clone)] // commitments/serial numbers are strings on VMTropy and so clippy generates a warning for `.to_string()`
     pub fn scan(&self, from: Option<SerialNumber>, limit: Option<usize>) -> Result<ScanResult> {
         let from = from.map(|commitment| commitment.to_string().into_bytes());
         let (reply_sender, reply_receiver) = sync_channel(0);
