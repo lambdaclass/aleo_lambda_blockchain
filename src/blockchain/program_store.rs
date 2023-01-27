@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use lib::vm;
+use lib::vm::{self, VerifyingKeyMap};
 use log::{debug, error};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::thread;
@@ -80,7 +80,7 @@ impl ProgramStore {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender
-            .send(Command::Get(*program_id, reply_sender))?;
+            .send(Command::Get(program_id.to_owned(), reply_sender))?;
 
         reply_receiver.recv()?
     }
@@ -95,7 +95,7 @@ impl ProgramStore {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender.send(Command::Add(
-            *program_id,
+            program_id.to_owned(),
             Box::new((program.clone(), verifying_keys.clone())),
             reply_sender,
         ))?;
@@ -108,7 +108,7 @@ impl ProgramStore {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
         self.command_sender
-            .send(Command::Exists(*program_id, reply_sender))
+            .send(Command::Exists(program_id.to_owned(), reply_sender))
             .unwrap();
 
         reply_receiver.recv().unwrap_or(false)
@@ -122,12 +122,20 @@ impl ProgramStore {
             Ok(())
         } else {
             debug!("Loading credits.aleo as part of Program Store initialization");
+
             let key_map = keys
+                .map
                 .into_iter()
-                .map(|(function, (_proving, verifying))| (function, verifying))
+                .map(|(i, (_, verifying_key))| (i, verifying_key))
                 .collect();
 
-            self.add(credits_program.id(), &credits_program, &key_map)
+            self.add(
+                credits_program.id(),
+                &credits_program,
+                &VerifyingKeyMap { map: key_map },
+            )?;
+
+            Ok(())
         }
     }
 }
@@ -135,7 +143,8 @@ impl ProgramStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lib::vm::{self, Program};
+    use lib::vm;
+    use lib::vm::Program;
     use std::{fs, str::FromStr};
 
     #[ctor::ctor]
@@ -191,15 +200,17 @@ mod tests {
         let program_path = format!("{}{}", env!("CARGO_MANIFEST_DIR"), path);
 
         let program_string = fs::read_to_string(program_path).unwrap();
-        let program = vm::generate_program(&program_string)?;
 
         // generate program keys (proving and verifying) and keep the verifying one for the store
-        let keys = vm::synthesize_program_keys(&program)?
+        let (program, program_build) = vm::build_program(&program_string)?;
+
+        let keys = program_build
+            .map
             .into_iter()
             .map(|(i, (_, verifying_key))| (i, verifying_key))
             .collect();
 
-        program_store.add(program.id(), &program, &keys)?;
+        program_store.add(program.id(), &program, &VerifyingKeyMap { map: keys })?;
 
         Ok(program)
     }

@@ -16,6 +16,11 @@ function consume:
      add r0.amount 0u64 into r1;
      output r1 as u64.public;
 
+function consume_b:
+     input r0 as token.record;
+     add r0.amount 0u64 into r1;
+     output r1 as u64.public;
+
 function consume_two:
      input r0 as token.record;
      input r1 as token.record;

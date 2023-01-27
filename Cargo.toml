@@ -57,14 +57,29 @@ indexmap = "1.9.2"
 itertools = "0.10.5"
 sha2 = "0.10.6"
 base64 = "0.20.0"
+sha3 = "0.10.6"
+cfg-if = "1"
+serial_test = "*"
+
+[dependencies.vmtropy]
+git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
+branch = "main"
+optional = true
 
 [dependencies.snarkvm]
 git = "https://github.com/lambdaclass/snarkVM.git"
 branch = "entropy_fork"
 features = ["circuit", "console", "parallel", "parameters"]
+optional = true
 
 [dev-dependencies]
 assert_fs = "1.0.9"
 assert_cmd = "2.0.6"
 retry = "2.0.0"
 ctor = "0.1.23"
+
+[features]
+default = ["snarkvm_backend"]
+#default = ["vmtropy_backend"]
+snarkvm_backend = ["snarkvm"]
+vmtropy_backend =  ["vmtropy"]

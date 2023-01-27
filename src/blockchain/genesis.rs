@@ -28,6 +28,7 @@ pub struct Cli {
 fn main() -> Result<()> {
     let cli: Cli = Cli::parse();
 
+    // update the genesis JSON with the calculated app state
     let genesis_path = cli
         .node_dirs
         .first()
@@ -70,14 +71,15 @@ fn main() -> Result<()> {
 
         println!("Generating record for {aleo_address}");
         // NOTE: using a hardcoded seed, not for production!
-        let seed = 123;
-        let record = vm::mint_record(
+        #[allow(unused_mut)]
+        let mut record = vm::mint_record(
             "credits.aleo",
             "credits",
             &validator.aleo_address,
             cli.amount,
-            seed,
+            1234,
         )?;
+
         genesis_records.push(record);
         validators.push(validator);
     }

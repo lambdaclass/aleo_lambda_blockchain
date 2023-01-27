@@ -1,9 +1,9 @@
 use crate::load_credits;
 use crate::validator;
-use crate::vm;
+use crate::vm::{self, VerifyingKeyMap};
 use anyhow::{anyhow, ensure, Result};
+use itertools::Itertools;
 use log::debug;
-use rand;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -33,10 +33,12 @@ impl Transaction {
     ) -> Result<Self> {
         let program_string = fs::read_to_string(path)?;
         debug!("Deploying program {}", program_string);
-        let program = vm::generate_program(&program_string)?;
 
         // generate program keys (proving and verifying) and keep the verifying one for the deploy
-        let verifying_keys = vm::synthesize_program_keys(&program)?
+        let (program, program_build) = vm::build_program(&program_string)?;
+
+        let verifying_keys = program_build
+            .map
             .into_iter()
             .map(|(i, keys)| (i, keys.1))
             .collect();
@@ -47,7 +49,9 @@ impl Transaction {
             id: "not known yet".to_string(),
             fee,
             program: Box::new(program),
-            verifying_keys,
+            verifying_keys: VerifyingKeyMap {
+                map: verifying_keys,
+            },
         }
         .set_hashed_id()
     }
@@ -56,21 +60,11 @@ impl Transaction {
     pub fn execution(
         program: vm::Program,
         function_name: vm::Identifier,
-        inputs: &[vm::Value],
+        inputs: &[vm::UserInputValueType],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let rng = &mut rand::thread_rng();
-
-        let (proving_key, _) = vm::synthesize_function_keys(&program, rng, &function_name)?;
-        let mut transitions = vm::execution(
-            program,
-            function_name,
-            inputs,
-            private_key,
-            rng,
-            proving_key,
-        )?;
+        let mut transitions = vm::execution(program, function_name, inputs, private_key, None)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -87,12 +81,13 @@ impl Transaction {
     }
 
     pub fn credits_execution(
-        function_name: &str,
-        inputs: &[vm::Value],
+        function_name: vm::Identifier,
+        inputs: &[vm::UserInputValueType],
         private_key: &vm::PrivateKey,
         requested_fee: Option<(u64, vm::Record)>,
     ) -> Result<Self> {
-        let mut transitions = Self::execute_credits(function_name, inputs, private_key)?;
+        let mut transitions =
+            Self::execute_credits(&function_name.to_string(), inputs, private_key)?;
 
         // some amount of fees may be implicit if the execution drops credits. in that case, those credits are
         // subtracted from the fees that were requested to be paid.
@@ -116,19 +111,38 @@ impl Transaction {
     }
 
     pub fn output_records(&self) -> Vec<(vm::Field, vm::EncryptedRecord)> {
-        self.transitions()
+        #[cfg(feature = "snarkvm_backend")]
+        return self
+            .transitions()
             .iter()
             .flat_map(|transition| transition.output_records())
             .map(|(commitment, record)| (*commitment, record.clone()))
-            .collect()
+            .collect();
+
+        #[cfg(feature = "vmtropy_backend")]
+        return self
+            .transitions()
+            .iter()
+            .flat_map(|transition| transition.output_records())
+            .map(|(commitment, record)| (commitment, record))
+            .collect();
     }
 
     /// If the transaction is an execution, return the list of input record serial numbers
     pub fn record_serial_numbers(&self) -> Vec<vm::Field> {
-        self.transitions()
+        #[cfg(feature = "snarkvm_backend")]
+        return self
+            .transitions()
             .iter()
-            .flat_map(|transition| transition.serial_numbers().cloned())
-            .collect()
+            .flat_map(|transition| transition.serial_numbers().copied())
+            .collect();
+
+        #[cfg(feature = "vmtropy_backend")]
+        return self
+            .transitions()
+            .iter()
+            .flat_map(|transition| transition.serial_numbers())
+            .collect();
     }
 
     fn transitions(&self) -> Vec<vm::Transition> {
@@ -181,13 +195,14 @@ impl Transaction {
 
                     // TODO: Factor out the following extraction and test it as with the original conversion
 
-                    let validator_higher: u128 = vm::int_from_output(extract_output(4)?)?;
-                    let validator_lower: u128 = vm::int_from_output(extract_output(5)?)?;
+                    let validator_key: [u64; 4] = [
+                        vm::int_from_output(extract_output(4)?)?,
+                        vm::int_from_output(extract_output(5)?)?,
+                        vm::int_from_output(extract_output(6)?)?,
+                        vm::int_from_output(extract_output(7)?)?,
+                    ];
 
-                    let validator = Transaction::validator_address_from_numbers(
-                        validator_higher,
-                        validator_lower,
-                    )?;
+                    let validator = Transaction::validator_key_from_u64s(&validator_key)?;
 
                     let aleo_address = vm::address_from_output(extract_output(3)?)?;
                     let validator = validator::Stake::new(&validator, aleo_address, amount)?;
@@ -220,9 +235,22 @@ impl Transaction {
             }
 
             let gates = gates as i64 - implicit_fee;
+            #[cfg(feature = "vmtropy_backend")]
             let inputs = [
-                vm::Value::Record(record),
-                vm::Value::from_str(&format!("{gates}u64"))?,
+                vm::UserInputValueType::Record(crate::vm::Record {
+                    owner: record.owner,
+                    gates: record.gates,
+                    data: record.data,
+                    nonce: record.nonce,
+                }),
+                // TODO: Revisit the cast below.
+                vm::UserInputValueType::U64(gates as u64),
+            ];
+
+            #[cfg(feature = "snarkvm_backend")]
+            let inputs = [
+                vm::UserInputValueType::Record(record),
+                vm::UserInputValueType::from_str(&format!("{gates}u64"))?,
             ];
 
             let transitions = Self::execute_credits("fee", &inputs, private_key)?;
@@ -234,13 +262,13 @@ impl Transaction {
 
     fn execute_credits(
         function: &str,
-        inputs: &[vm::Value],
+        inputs: &[vm::UserInputValueType],
         private_key: &vm::PrivateKey,
     ) -> Result<Vec<vm::Transition>> {
-        let rng = &mut rand::thread_rng();
         let function = vm::Identifier::from_str(function)?;
         let (program, keys) = load_credits();
         let (proving_key, _) = keys
+            .map
             .get(&function)
             .ok_or_else(|| anyhow!("credits function not found"))?;
 
@@ -249,8 +277,7 @@ impl Transaction {
             function,
             inputs,
             private_key,
-            rng,
-            proving_key.clone(),
+            Some(proving_key.clone()),
         )
     }
 
@@ -293,13 +320,17 @@ impl Transaction {
             } => {
                 hasher.update(program.id().to_string());
 
-                for (key, value) in verifying_keys.into_iter() {
+                for (key, value) in verifying_keys.map.clone().into_iter() {
                     hasher.update(key.to_string());
-                    hasher.update(serde_json::to_string(value)?);
+                    #[cfg(feature = "snarkvm_backend")]
+                    let serialization = serde_json::to_string(&value)?;
+                    #[cfg(feature = "vmtropy_backend")]
+                    let serialization = vmtropy::serialize_verifying_key(value)?;
+                    hasher.update(serialization);
                 }
 
                 if let Some(fee) = fee {
-                    hasher.update(fee.to_string());
+                    hasher.update(serde_json::to_string(fee)?);
                 }
             }
             Transaction::Execution {
@@ -317,7 +348,7 @@ impl Transaction {
     }
 
     // TODO: Move this to validator set/use tendermint-rs structs for pub keys?
-    pub fn validator_address_as_numbers(bytes: &[u8]) -> Result<(u128, u128)> {
+    pub fn validator_key_as_u128s(bytes: &[u8]) -> Result<(u128, u128)> {
         ensure!(
             bytes.len() == 32,
             "Input validator address is not 32 bytes long"
@@ -331,11 +362,45 @@ impl Transaction {
         ))
     }
 
-    pub fn validator_address_from_numbers(higher: u128, lower: u128) -> Result<String> {
+    pub fn validator_key_from_u128s(higher: u128, lower: u128) -> Result<String> {
         let mut address = higher.to_be_bytes().to_vec();
 
         address.append(&mut lower.to_be_bytes().to_vec());
         Ok(base64::encode(address))
+    }
+
+    /// Returns a slice of 32 bytes (the size of a Tendermint Public Key) as 4 sections of `u64`s
+    /// where the order of the `u64s` is from the most significant to the least significant
+    pub fn validator_key_as_u64s(bytes: &[u8]) -> Result<Vec<u64>> {
+        ensure!(
+            bytes.len() == 32,
+            "Input validator address is not 32 bytes long"
+        );
+
+        let sections: Vec<u64> = bytes
+            .chunks_exact(8)
+            .map(|x| u64::from_be_bytes(x.try_into().expect("error converting address into u64s")))
+            .collect();
+
+        ensure!(
+            sections.len() == 4,
+            "Input validator address was incorrectly converted"
+        );
+
+        Ok(sections)
+    }
+
+    /// Returns a Tendermint Public Key from a slice of 4 `u64`s, where the first `u64`
+    /// corresponds to the most significant section of bytes and the order of significance
+    /// is descending
+    pub fn validator_key_from_u64s(sections: &[u64]) -> Result<String> {
+        ensure!(
+            sections.len() == 4,
+            "Input validator address does not have 4 sections"
+        );
+
+        let sections = sections.iter().flat_map(|x| x.to_be_bytes()).collect_vec();
+        Ok(base64::encode(sections))
     }
 }
 
@@ -347,8 +412,7 @@ impl std::fmt::Display for Transaction {
             }
             Transaction::Execution { id, transitions } => {
                 let transition = transitions.first().unwrap();
-                let program_id = transition.program_id();
-                write!(f, "Execution({program_id},{id})")
+                write!(f, "Execution({},{id})", transition.program_id())
             }
         }
     }
@@ -359,13 +423,30 @@ mod tests {
     use crate::transaction::Transaction;
 
     #[test]
-    fn convert_validator_address() {
+    fn convert_validator_address_u128() {
         let pub_key = "KvYujhwQVoCOH1B3FrmtjSN5GgKUjarOKDNIbWfA8hc=";
         let key_encoded = base64::decode(pub_key).unwrap();
-        let (h, l) = Transaction::validator_address_as_numbers(&key_encoded).unwrap();
+        let (h, l) = Transaction::validator_key_as_u128s(&key_encoded).unwrap();
         assert!(h == 57105825100092210844007095251039268237u128);
         assert!(l == 47151775319435836265997973510082851351u128);
 
-        assert!(Transaction::validator_address_from_numbers(h, l).unwrap() == pub_key);
+        assert!(Transaction::validator_key_from_u128s(h, l).unwrap() == pub_key);
+    }
+
+    #[test]
+    fn convert_validator_address_u64() {
+        let pub_key = "KvYujhwQVoCOH1B3FrmtjSN5GgKUjarOKDNIbWfA8hc=";
+        let key_encoded = base64::decode(pub_key).unwrap();
+        let key_sections = Transaction::validator_key_as_u64s(&key_encoded).unwrap();
+
+        let expected_slice = [
+            3095712981754861184u64,
+            10240992550076394893u64,
+            2556102861894036174u64,
+            2896738620058694167u64,
+        ];
+
+        assert_eq!(key_sections, expected_slice);
+        assert!(Transaction::validator_key_from_u64s(&key_sections).unwrap() == pub_key);
     }
 }

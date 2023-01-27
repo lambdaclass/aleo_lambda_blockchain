@@ -16,7 +16,7 @@ pub fn aleo_home() -> PathBuf {
 /// Get the credits program. This is a special built-in program of the system, which contains
 /// functions to move aleo money. Since it's required for most uses in clients and servers, it's
 /// cached to only be built once.
-pub fn load_credits() -> (vm::Program, vm::KeyPairMap) {
+pub fn load_credits() -> (vm::Program, vm::ProgramBuild) {
     // try to fetch from cache
     let cache_path = aleo_home().join("cache/credits.avm");
     if let Ok(program) = program_file::ProgramFile::load(&cache_path) {
