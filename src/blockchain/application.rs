@@ -115,9 +115,8 @@ impl Application for SnarkVMApp {
     /// This ABCI hook validates an incoming transaction before inserting it in the
     /// mempool and relaying it to other nodes.
     fn check_tx(&self, request: abci::RequestCheckTx) -> abci::ResponseCheckTx {
-        info!("Check Tx");
-
-        let tx = bincode::deserialize(&request.tx).unwrap();
+        let tx: Transaction = bincode::deserialize(&request.tx).unwrap();
+        info!("Check Tx ID: {}", tx.id());
 
         let result = self
             .check_no_duplicate_records(&tx)
@@ -335,6 +334,7 @@ impl SnarkVMApp {
         let already_spent = serial_numbers
             .iter()
             .find(|serial_number| !self.records.is_unspent(serial_number).unwrap_or(true));
+
         if let Some(serial_number) = already_spent {
             bail!(
                 "input record serial number {} is unknown or already spent",
@@ -375,6 +375,7 @@ impl SnarkVMApp {
             .stake_updates()?
             .into_iter()
             .for_each(|update| validator_set.apply(update));
+
         Ok(())
     }
 
@@ -539,9 +540,14 @@ mod tests {
 
         let transaction_json = json!(transaction);
 
+        #[cfg(feature = "vmtropy_backend")]
+        let pointer_path = "/Execution/transitions/0/outputs/0/EncryptedRecord/1/ciphertext";
+        #[cfg(feature = "snarkvm_backend")]
+        let pointer_path = "/Execution/transitions/0/outputs/0/value";
+
         // extract the record to use in upcoming transactions
         let output_record = transaction_json
-            .pointer("/Execution/transitions/0/outputs/0/value")
+            .pointer(pointer_path)
             .unwrap()
             .as_str()
             .unwrap();

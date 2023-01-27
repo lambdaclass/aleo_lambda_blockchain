@@ -267,13 +267,11 @@ fn key_exists_or_fails(db: &rocksdb::DB, key: &Key) -> bool {
 mod tests {
     use std::fs;
 
+    use super::*;
     #[allow(unused_imports)]
     use indexmap::IndexMap;
     #[allow(unused_imports)]
     use lib::vm::{compute_serial_number, PrivateKey, Record, ViewKey};
-    type PublicRecord = lib::vm::Record;
-
-    use super::*;
 
     #[ctor::ctor]
     fn init() {
@@ -444,7 +442,7 @@ mod tests {
         let rng = &mut rand::thread_rng();
         let randomizer = Uniform::rand(rng);
         let nonce = Testnet3::g_scalar_multiply(&randomizer);
-        let record = PublicRecord::from_str(
+        let record = lib::vm::Record::from_str(
             &format!("{{ owner: aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry.private, gates: 5u64.private, token_amount: 100u64.private, _nonce: {nonce}.public }}"),
         ).unwrap();
         let program_id = ProgramID::from_str("foo.aleo").unwrap();

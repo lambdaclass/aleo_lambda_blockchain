@@ -8,6 +8,7 @@ use sha3::{Digest, Sha3_256};
 pub use vmtropy::build_program;
 pub use vmtropy::jaleo::{get_credits_key, mint_credits};
 pub use vmtropy::jaleo::{Itertools, UserInputValueType};
+use vmtropy::snarkvm::prelude::FromBytes;
 use vmtropy::VariableType;
 
 const MAX_INPUTS: usize = 8;
@@ -133,7 +134,6 @@ pub fn verify_execution(
         .map
         .get(&transition.function_name)
         .ok_or_else(|| anyhow!("missing verifying key"))?;
-
     // Decode and deserialize the proof.
     let proof_bytes = hex::decode(&transition.proof)?;
 
@@ -154,6 +154,7 @@ pub fn verify_execution(
         vmtropy::verify_proof(verifying_key.clone(), &inputs, &proof)?,
         "Transition is invalid"
     );
+
     Ok(())
 }
 
@@ -167,12 +168,12 @@ pub fn generate_program(program_string: &str) -> Result<Program> {
     Program::from_str(program_string)
 }
 
-// The _rng and _key arguments are here just to be compliant with the snarkVM API, we don't actually use them.
 pub fn execution(
     program: Program,
     function_name: Identifier,
     inputs: &[UserInputValueType],
     private_key: &PrivateKey,
+    _proving_key: Option<ProvingKey>,
 ) -> Result<Vec<Transition>> {
     ensure!(
         !program_is_coinbase(&program.id().to_string(), &function_name.to_string()),
@@ -247,4 +248,48 @@ pub fn mint_record(
     // and encrypt the record. Once again, we don't really do things that way for now.
 
     mint_credits(owner_address, gates, seed)
+}
+
+/// Matches types of literals (that we know are numbers) and turns them into u128 before trying to downcast to the desired type
+// TODO: Once https://trello.com/c/vtHu588B/77-handle-inputs-and-outputs-visibility-encryption is merged, fix this
+pub fn int_from_output<T: std::convert::TryFrom<u128>>(output: &VariableType) -> Result<T>
+where
+    <T as TryFrom<u128>>::Error: std::fmt::Debug,
+{
+    match output {
+        VariableType::Private(user_input_value_type)
+        | VariableType::Public(user_input_value_type) => {
+            let value = match user_input_value_type {
+                UserInputValueType::U8(v) => *v as u128,
+                UserInputValueType::U16(v) => *v as u128,
+                UserInputValueType::U32(v) => *v as u128,
+                UserInputValueType::U64(v) => *v as u128,
+                UserInputValueType::U128(v) => *v as u128,
+                _ => todo!(),
+            };
+            return Ok(T::try_from(value).expect("issue casting literal to desired type"));
+        }
+        _ => {
+            bail!("output type extraction not supported");
+        }
+    };
+}
+
+// same as above
+pub fn address_from_output(output: &VariableType) -> Result<Address> {
+    if let VariableType::Public(UserInputValueType::Address(address)) = output {
+        let address = Address::from_bytes_le(address)?;
+        return Ok(address);
+    };
+
+    if let VariableType::Private(UserInputValueType::Address(address)) = output {
+        let address = Address::from_str(&String::from_utf8(address.to_vec())?)?;
+        return Ok(address);
+    };
+
+    bail!("output type extraction not supported");
+}
+
+pub fn u64_to_value(amount: u64) -> UserInputValueType {
+    UserInputValueType::from_str(&format!("{amount}u64")).expect("couldn't parse amount")
 }
