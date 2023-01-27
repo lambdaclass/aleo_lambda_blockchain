@@ -63,7 +63,7 @@ serial_test = "*"
 
 [dependencies.vmtropy]
 git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
-branch = "integration"
+branch = "main"
 optional = true
 
 [dependencies.snarkvm]
