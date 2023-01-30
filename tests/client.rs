@@ -176,7 +176,6 @@ fn decrypt_records() {
 }
 
 #[test]
-#[serial(records)]
 fn token_transaction() {
     // Create two accounts: Alice and Bob
     let (_tempfile_alice, alice_home, alice_credentials) = &new_account();
@@ -261,7 +260,6 @@ fn token_transaction() {
 }
 
 #[test]
-#[serial(records)]
 fn consume_records() {
     // new account41
     let (_acc_file, home_path, _) = &new_account();
@@ -359,7 +357,6 @@ fn try_create_credits() {
 }
 
 #[test]
-#[serial(records)]
 fn transfer_credits() {
     let validator_home = validator_account_path();
 
@@ -404,7 +401,6 @@ fn transfer_credits() {
 }
 
 #[test]
-#[serial(records)]
 fn transaction_fees() {
     // create a test account
     let (_tempfile, receiver_home, credentials) = &new_account();

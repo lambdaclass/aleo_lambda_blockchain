@@ -7,9 +7,9 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-            toolchain: 1.66.0
-            default: true
+            toolchain: nightly
             profile: minimal
+            default: true
 # Rust cache temporarily disabled until issue (https://github.com/actions/cache/issues/810) is fixed
 #     - uses: Swatinem/rust-cache@v2
 #       with:
@@ -17,22 +17,23 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: '1.16.1'
+      - run: rustup update; ulimit -n 4864; cargo clean
       - run: cargo build --release --features vmtropy_backend
       - run: make reset
       - run: |
           make node VM_FEATURE=vmtropy_backend > /dev/null &
           make abci VM_FEATURE=vmtropy_backend > /dev/null &
-          while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done
-          make test VM_FEATURE=vmtropy_backend
-      - run: pkill make 
+          while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done;
+          cargo test --release --features vmtropy_backend -- --nocapture --test-threads=4 
+      - run: pkill make;
              make reset 
       - run: rm -rf ~/.aleo/cache
-      - run: cargo build --release --features snarkvm_backend
+      - run: cargo build --release --features vmtropy_backend
       - run: |
           make node VM_FEATURE=snarkvm_backend > /dev/null &
           make abci VM_FEATURE=snarkvm_backend > /dev/null &
-          while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done
-          make test VM_FEATURE=snarkvm_backend
+          while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done;
+          cargo test --release --features snarkvm_backend -- --nocapture --test-threads=4 
   clippy:
     runs-on: [self-hosted, nomad]
     steps:
