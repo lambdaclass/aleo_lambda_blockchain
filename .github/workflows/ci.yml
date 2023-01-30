@@ -7,7 +7,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-            toolchain: nightly
+            toolchain: stable
             profile: minimal
 # Rust cache temporarily disabled until issue (https://github.com/actions/cache/issues/810) is fixed
 #     - uses: Swatinem/rust-cache@v2
