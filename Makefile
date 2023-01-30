@@ -104,7 +104,7 @@ abci:
 # run tests on release mode (default VM backend) to ensure there is no extra printing to stdout
 test: FEATURE:=snarkvm_abci
 test:
-	RUST_BACKTRACE=full cargo test --release --features $(VM_FEATURE) -- --nocapture --test-threads=4
+	RUST_BACKTRACE=full cargo test --release --features $(VM_FEATURE) -- --nocapture
 
 
 dockernet-build-abci:
