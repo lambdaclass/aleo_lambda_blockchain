@@ -8,6 +8,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
             toolchain: 1.66.0
+            default: true
             profile: minimal
 # Rust cache temporarily disabled until issue (https://github.com/actions/cache/issues/810) is fixed
 #     - uses: Swatinem/rust-cache@v2
