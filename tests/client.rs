@@ -20,6 +20,7 @@ const CONSUME_FUNCTION: &str = "consume";
 
 const CURRENT_ACCOUNT: &str = "%account";
 
+
 #[test]
 fn basic_program() {
     let (_tempfile, home_path, _) = &new_account();
@@ -260,7 +261,6 @@ fn token_transaction() {
 }
 
 #[test]
-#[serial(records)]
 fn consume_records() {
     // new account41
     let (_acc_file, home_path, _) = &new_account();
