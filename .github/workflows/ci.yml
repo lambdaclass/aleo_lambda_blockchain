@@ -23,7 +23,8 @@ jobs:
           make abci VM_FEATURE=vmtropy_backend > /dev/null &
           while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done
           make test VM_FEATURE=vmtropy_backend
-      - run: killall make & make reset 
+      - run: pkill make 
+             make reset 
       - run: rm -rf ~/.aleo/cache
       - run: cargo build --release --features snarkvm_backend
       - run: |
