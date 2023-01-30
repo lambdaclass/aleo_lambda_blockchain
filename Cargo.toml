@@ -59,7 +59,6 @@ sha2 = "0.10.6"
 base64 = "0.20.0"
 sha3 = "0.10.6"
 cfg-if = "1"
-serial_test = "*"
 
 [dependencies.vmtropy]
 git = "https://github.com/lambdaclass/aleo_lambda_vm.git"
