@@ -55,4 +55,3 @@ jobs:
             toolchain: nightly
             components: rustfmt
       - run: cargo fmt -- --check
-      - run: cargo fmt -- --check
