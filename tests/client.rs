@@ -20,7 +20,6 @@ const CONSUME_FUNCTION: &str = "consume";
 
 const CURRENT_ACCOUNT: &str = "%account";
 
-
 #[test]
 fn basic_program() {
     let (_tempfile, home_path, _) = &new_account();
