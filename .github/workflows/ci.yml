@@ -19,10 +19,16 @@ jobs:
       - run: cargo build --release
       - run: make reset
       - run: |
-          make node > /dev/null &
-          make abci > /dev/null &
+          make node VM_FEATURE=vmtropy_backend > /dev/null &
+          make abci VM_FEATURE=vmtropy_backend > /dev/null &
           while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done
-          make test
+          make test VM_FEATURE=vmtropy_backend
+      - run: make reset & rm -rf ~/.aleo/cache
+      - run: |
+          make node VM_FEATURE=snarkvm_backend > /dev/null &
+          make abci VM_FEATURE=snarkvm_backend > /dev/null &
+          while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done
+          make test VM_FEATURE=snarkvm_backend
   clippy:
     runs-on: [self-hosted, nomad]
     steps:
