@@ -357,7 +357,6 @@ fn try_create_credits() {
 }
 
 #[test]
-#[serial(records)]
 fn transfer_credits() {
     let validator_home = validator_account_path();
 
