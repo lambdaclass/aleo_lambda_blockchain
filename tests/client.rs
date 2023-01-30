@@ -7,6 +7,7 @@ use assert_fs::NamedTempFile;
 use rand::Rng;
 use retry::{self, delay::Fixed};
 use serde::de::DeserializeOwned;
+use serial_test::serial;
 use std::str;
 use std::{collections::HashMap, fs};
 
@@ -18,6 +19,7 @@ const TRANSFER_FUNCTION: &str = "transfer_amount";
 const CONSUME_FUNCTION: &str = "consume";
 
 const CURRENT_ACCOUNT: &str = "%account";
+
 
 #[test]
 fn basic_program() {
@@ -175,6 +177,7 @@ fn decrypt_records() {
 }
 
 #[test]
+#[serial(records)]
 fn token_transaction() {
     // Create two accounts: Alice and Bob
     let (_tempfile_alice, alice_home, alice_credentials) = &new_account();
@@ -259,6 +262,7 @@ fn token_transaction() {
 }
 
 #[test]
+#[serial(records)]
 fn consume_records() {
     // new account41
     let (_acc_file, home_path, _) = &new_account();
@@ -356,6 +360,7 @@ fn try_create_credits() {
 }
 
 #[test]
+#[serial(records)]
 fn transfer_credits() {
     let validator_home = validator_account_path();
 
@@ -400,6 +405,7 @@ fn transfer_credits() {
 }
 
 #[test]
+#[serial(records)]
 fn transaction_fees() {
     // create a test account
     let (_tempfile, receiver_home, credentials) = &new_account();
