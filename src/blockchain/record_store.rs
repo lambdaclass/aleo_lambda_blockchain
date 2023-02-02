@@ -180,7 +180,7 @@ impl RecordStore {
     }
 
     /// Saves a new unspent record to the write buffer
-    #[allow(clippy::redundant_clone)] // commitments/serial numbers are strings on VMTropy and so clippy generates a warning for `.to_string()`
+    #[allow(clippy::redundant_clone)] // commitments/serial numbers are strings on lambdavm and so clippy generates a warning for `.to_string()`
     pub fn add(&self, commitment: Commitment, record: vm::EncryptedRecord) -> Result<()> {
         let (reply_sender, reply_receiver) = sync_channel(0);
 
@@ -219,7 +219,7 @@ impl RecordStore {
     }
 
     /// Return up to `limit` record ciphertexts
-    #[allow(clippy::redundant_clone)] // commitments/serial numbers are strings on VMTropy and so clippy generates a warning for `.to_string()`
+    #[allow(clippy::redundant_clone)] // commitments/serial numbers are strings on lambdavm and so clippy generates a warning for `.to_string()`
     pub fn scan(&self, from: Option<SerialNumber>, limit: Option<usize>) -> Result<ScanResult> {
         let from = from.map(|commitment| commitment.to_string().into_bytes());
         let (reply_sender, reply_receiver) = sync_channel(0);
@@ -418,9 +418,9 @@ mod tests {
 
     // TODO: (check if it's possible) make a test for validating behavior related to spending a non-existant record
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
-        use vmtropy::snarkvm::prelude::{Scalar, Uniform};
+        use lambdavm::snarkvm::prelude::{Scalar, Uniform};
 
         let address =
             String::from("aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry");

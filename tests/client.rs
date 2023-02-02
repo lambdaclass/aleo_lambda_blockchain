@@ -41,7 +41,7 @@ fn basic_program() {
     // get execution tx, assert expected output
     let transaction = retry_command(home_path, &["get", transaction_id]).unwrap();
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let pointer_path = "/Execution/transitions/0/outputs/0/Private";
     #[cfg(feature = "snarkvm_backend")]
     let pointer_path = "/Execution/transitions/0/outputs/0/value";
@@ -93,12 +93,12 @@ fn program_validations() {
 
     #[cfg(feature = "snarkvm_backend")]
     assert!(error.contains("does not exist"));
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     assert!(error.contains("is not defined"));
 
     // fail on missing parameter
     let error = execute_program(home_path, &program_path, HELLO_PROGRAM, &["1u32"]).unwrap_err();
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     assert!(error.contains("not assigned in registers"));
     #[cfg(feature = "snarkvm_backend")]
     assert!(error.contains("expects 2 inputs"));
@@ -131,7 +131,7 @@ fn decrypt_records() {
     let (owner, gates, amount) = get_decrypted_record(&transaction);
 
     cfg_if::cfg_if! {
-        if #[cfg(feature = "vmtropy_backend")] {
+        if #[cfg(feature = "lambdavm_backend")] {
             let expected_amount = "1u64";
             let expected_gates = "0u64";
             let expected_owner = address.to_string();
@@ -218,7 +218,7 @@ fn token_transaction() {
     let (owner, _gates, amount) = get_decrypted_record(&transaction);
 
     cfg_if::cfg_if! {
-        if #[cfg(feature = "vmtropy_backend")] {
+        if #[cfg(feature = "lambdavm_backend")] {
             assert_eq!(
                 owner,
                 format!("{}", alice_credentials.get("address").unwrap())
@@ -239,7 +239,7 @@ fn token_transaction() {
     let transaction = retry_command(_bob_home, &["get", transfer_transaction_id, "-d"]).unwrap();
     let (owner, _gates, amount) = get_decrypted_record(&transaction);
     cfg_if::cfg_if! {
-        if #[cfg(feature = "vmtropy_backend")] {
+        if #[cfg(feature = "lambdavm_backend")] {
             assert_eq!(
                 owner,
                 format!("{}", bob_credentials.get("address").unwrap())
@@ -348,8 +348,8 @@ fn try_create_credits() {
         &["100u64", "%account"],
     );
 
-    // TODO: When https://trello.com/c/3CM4OES2/78-make-sure-credits-are-not-being-minted-when-creating-executions is finished, this should return an error when using VMTropy
-    #[cfg(feature = "vmtropy_backend")]
+    // TODO: When https://trello.com/c/3CM4OES2/78-make-sure-credits-are-not-being-minted-when-creating-executions is finished, this should return an error when using lambdavm
+    #[cfg(feature = "lambdavm_backend")]
     output.unwrap();
     #[cfg(feature = "snarkvm_backend")]
     assert!(output
@@ -363,7 +363,7 @@ fn transfer_credits() {
     let validator_home = validator_account_path();
 
     // assuming the first record has more than 10 credits
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/1/ciphertext")
@@ -429,7 +429,7 @@ fn transaction_fees() {
         .unwrap()
         .to_string();
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/1/ciphertext")
@@ -497,7 +497,7 @@ fn transaction_fees() {
         .unwrap()
         .to_string();
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let record = client_command(receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
@@ -525,7 +525,7 @@ fn transaction_fees() {
         .unwrap()
         .to_string();
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let record = client_command(receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
@@ -586,7 +586,7 @@ fn staking() {
 
     #[cfg(feature = "snarkvm_backend")]
     let expected_subtraction_error = "Integer subtraction failed";
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let expected_subtraction_error = "Subtraction underflow";
 
     #[cfg(feature = "snarkvm_backend")]
@@ -598,7 +598,7 @@ fn staking() {
         .unwrap()
         .to_string();
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/2/ciphertext")
@@ -632,7 +632,7 @@ fn staking() {
         .unwrap()
         .to_string();
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let user_record = client_command(&receiver_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
@@ -685,7 +685,7 @@ fn staking() {
         .unwrap()
         .to_string();
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let validator_record = client_command(&validator_home, &["account", "records"])
         .unwrap()
         .pointer("/0/ciphertext")
@@ -716,7 +716,7 @@ fn staking() {
         .as_str()
         .unwrap();
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let staked_credits_record = transaction
         .pointer("/Execution/transitions/0/outputs/1/EncryptedRecord/1/ciphertext")
         .unwrap()
@@ -853,7 +853,7 @@ fn get_encrypted_record(transaction: &serde_json::Value) -> &str {
     #[cfg(feature = "snarkvm_backend")]
     let pointer_path = "/Execution/transitions/0/outputs/0/value";
 
-    #[cfg(feature = "vmtropy_backend")]
+    #[cfg(feature = "lambdavm_backend")]
     let pointer_path = "/Execution/transitions/0/outputs/0/EncryptedRecord/1/ciphertext";
 
     transaction.pointer(pointer_path).unwrap().as_str().unwrap()

@@ -3,7 +3,7 @@ mod snarkvm;
 #[cfg(feature = "snarkvm_backend")]
 pub use self::snarkvm::*;
 
-#[cfg(feature = "vmtropy_backend")]
-mod vmtropy;
-#[cfg(feature = "vmtropy_backend")]
-pub use self::vmtropy::*;
+#[cfg(feature = "lambdavm_backend")]
+mod lambdavm;
+#[cfg(feature = "lambdavm_backend")]
+pub use self::lambdavm::*;

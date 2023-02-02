@@ -61,9 +61,9 @@ sha3 = "0.10.6"
 cfg-if = "1"
 serial_test = "*"
 
-[dependencies.vmtropy]
+[dependencies.lambdavm]
 git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
-branch = "main"
+branch = "rename-crate"
 optional = true
 
 [dependencies.snarkvm]
@@ -80,6 +80,6 @@ ctor = "0.1.23"
 
 [features]
 default = ["snarkvm_backend"]
-#default = ["vmtropy_backend"]
+#default = ["lambdavm_backend"]
 snarkvm_backend = ["snarkvm"]
-vmtropy_backend =  ["vmtropy"]
+lambdavm_backend =  ["lambdavm"]
