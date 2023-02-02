@@ -63,7 +63,7 @@ serial_test = "*"
 
 [dependencies.lambdavm]
 git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
-branch = "rename-crate"
+branch = "main"
 optional = true
 
 [dependencies.snarkvm]
