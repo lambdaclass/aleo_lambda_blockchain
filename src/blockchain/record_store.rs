@@ -420,7 +420,7 @@ mod tests {
 
     #[cfg(feature = "lambdavm_backend")]
     fn new_record() -> (EncryptedRecord, Commitment, SerialNumber) {
-        use lambdavm::snarkvm::prelude::{Scalar, Uniform};
+        use snarkvm::prelude::{Scalar, Uniform};
 
         let address =
             String::from("aleo1330ghze6tqvc0s9vd43mnetxlnyfypgf6rw597gn4723lp2wt5gqfk09ry");

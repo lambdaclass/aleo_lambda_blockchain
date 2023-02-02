@@ -279,12 +279,14 @@ where
 // same as above
 pub fn address_from_output(output: &VariableType) -> Result<Address> {
     if let VariableType::Public(UserInputValueType::Address(address)) = output {
-        let address = Address::from_bytes_le(address)?;
+        let address_string = std::str::from_utf8(address)?;
+        let address = Address::from_str(address_string)?;
         return Ok(address);
     };
 
     if let VariableType::Private(UserInputValueType::Address(address)) = output {
-        let address = Address::from_str(&String::from_utf8(address.to_vec())?)?;
+        let address_string = std::str::from_utf8(address)?;
+        let address = Address::from_str(address_string)?;
         return Ok(address);
     };
 

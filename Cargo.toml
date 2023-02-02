@@ -74,6 +74,7 @@ optional = true
 
 [dev-dependencies]
 assert_fs = "1.0.9"
+snarkvm = { git = "https://github.com/Lambdaclass/snarkVM.git", branch = "entropy_fork" } # used for creating records in tests
 assert_cmd = "2.0.6"
 retry = "2.0.0"
 ctor = "0.1.23"
