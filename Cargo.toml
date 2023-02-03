@@ -60,8 +60,8 @@ base64 = "0.20.0"
 sha3 = "0.10.6"
 cfg-if = "1"
 
-[dependencies.vmtropy]
-git = "https://github.com/lambdaclass/aleo_lambda_vm.git"
+[dependencies.lambdavm]
+git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
 branch = "main"
 optional = true
 
@@ -77,13 +77,14 @@ debug = true
 
 [dev-dependencies]
 assert_fs = "1.0.9"
+snarkvm = { git = "https://github.com/Lambdaclass/snarkVM.git", branch = "entropy_fork" } # used for creating records in tests
 assert_cmd = "2.0.6"
 retry = "2.0.0"
 serial_test = "1.0.0"
 ctor = "0.1.23"
 
 [features]
+#default = ["lambdavm_backend"]
 #default = ["snarkvm_backend"]
-#default = ["vmtropy_backend"]
 snarkvm_backend = ["snarkvm"]
-vmtropy_backend =  ["vmtropy"]
+lambdavm_backend =  ["lambdavm"]

@@ -193,7 +193,7 @@ impl Command {
                         |acc, (_, _, record)| {
                             #[cfg(feature = "snarkvm_backend")]
                             let gates = ***record.gates();
-                            #[cfg(feature = "vmtropy_backend")]
+                            #[cfg(feature = "lambdavm_backend")]
                             let gates = record.gates;
                             acc + gates
                         },
@@ -541,7 +541,7 @@ fn select_default_fee_record(
         .sorted_by_key(|record| {
             #[cfg(feature = "snarkvm_backend")]
             let gates = ***record.gates();
-            #[cfg(feature = "vmtropy_backend")]
+            #[cfg(feature = "lambdavm_backend")]
             let gates = record.gates;
 
             // negate to get bigger records first
@@ -550,7 +550,7 @@ fn select_default_fee_record(
         .find(|record| {
             #[cfg(feature = "snarkvm_backend")]
             let gates = ***record.gates();
-            #[cfg(feature = "vmtropy_backend")]
+            #[cfg(feature = "lambdavm_backend")]
             let gates = record.gates;
             // note that here we require that the amount of the record be more than the requested fee
             // even though there may be implicit fees in the execution that make the actual amount to be subtracted
