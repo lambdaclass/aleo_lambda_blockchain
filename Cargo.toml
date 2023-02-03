@@ -25,7 +25,7 @@ path = "src/blockchain/genesis.rs"
 test = false
 
 [[bin]]
-name = "snarkvm_abci"
+name = "aleo_abci"
 path = "src/blockchain/main.rs"
 
 [dependencies]
@@ -94,10 +94,14 @@ ctor = "0.1.23"
 
 [features]
 <<<<<<< HEAD
+<<<<<<< HEAD
 #default = ["snarkvm_backend"]
 #default = ["vmtropy_backend"]
 =======
 #default = ["lambdavm_backend"]
+=======
+default = ["lambdavm_backend"]
+>>>>>>> 815924c (change ABCI binary name)
 #default = ["snarkvm_backend"]
 >>>>>>> 1adbbac (Use `LambdaVM` instead of `VMTropy` after rename (#6))
 snarkvm_backend = ["snarkvm"]
