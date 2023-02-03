@@ -7,7 +7,6 @@ use assert_fs::NamedTempFile;
 use rand::Rng;
 use retry::{self, delay::Fixed};
 use serde::de::DeserializeOwned;
-use serial_test::serial;
 use std::str;
 use std::{collections::HashMap, fs};
 
