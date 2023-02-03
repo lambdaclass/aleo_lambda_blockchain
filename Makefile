@@ -9,7 +9,7 @@ ARCH=amd64
 endif
 
 TENDERMINT_HOME=~/.tendermint/
-VM_FEATURE=vmtropy_backend
+VM_FEATURE=lambdavm_backend
 
 # Build the client program and put it in bin/aleo
 cli:

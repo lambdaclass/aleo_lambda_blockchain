@@ -6,7 +6,6 @@ use anyhow::{anyhow, bail, ensure, Result};
 pub use lambdavm::build_program;
 pub use lambdavm::jaleo::{get_credits_key, mint_credits};
 pub use lambdavm::jaleo::{Itertools, UserInputValueType};
-use lambdavm::snarkvm::prelude::FromBytes;
 use lambdavm::VariableType;
 use log::debug;
 use sha3::{Digest, Sha3_256};
