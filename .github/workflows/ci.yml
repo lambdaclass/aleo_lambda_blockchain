@@ -17,17 +17,17 @@ jobs:
         with:
           go-version: '1.16.1'
       - run: rustup update; ulimit -n 4864; cargo clean
-      - run: cargo build --release --features vmtropy_backend
+      - run: cargo build --release --features lambdavm_backend
       - run: make reset
       - run: |
-          make node VM_FEATURE=vmtropy_backend > /dev/null &
-          make abci VM_FEATURE=vmtropy_backend > /dev/null &
+          make node VM_FEATURE=lambdavm_backend > /dev/null &
+          make abci VM_FEATURE=lambdavm_backend > /dev/null &
           while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done;
-          cargo test --release --features vmtropy_backend -- --nocapture --test-threads=4 
+          cargo test --release --features lambdavm_backend -- --nocapture --test-threads=4 
       - run: pkill make;
              make reset 
       - run: rm -rf ~/.aleo/cache
-      - run: cargo build --release --features vmtropy_backend
+      - run: cargo build --release --features lambdavm_backend
       - run: |
           make node VM_FEATURE=snarkvm_backend > /dev/null &
           make abci VM_FEATURE=snarkvm_backend > /dev/null &
@@ -47,7 +47,7 @@ jobs:
  #         key:  "mostropy"
       - run: apt install -y clang libclang1
       - run: cargo +nightly clippy --all-targets --features snarkvm_backend -- -D warnings 
-      - run: cargo +nightly clippy --all-targets --features vmtropy_backend -- -D warnings 
+      - run: cargo +nightly clippy --all-targets --features lambdavm_backend -- -D warnings 
   format:
     runs-on: [self-hosted, nomad]
     steps:
