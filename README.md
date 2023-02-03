@@ -10,10 +10,11 @@ The consensus/blockchain engine has been built with [Tendermint Core](https://do
 
 ## Table of Contents  
 
-- [Aleo-Lambda Blockchain](#aleo-lambda-blockchain)
+- [Aleo Lambda Blockchain](#aleo-lambda-blockchain)
   - [Project structure](#project-structure)
   - [Example application usage](#example-application-usage)
     - [Sending programs and executions to the blockchain](#sending-programs-and-executions-to-the-blockchain)
+    - [Changing the VM backend](#changing-the-vm-backend)
   - [Other features](#other-features)
     - [Debugging the client/ABCI](#debugging-the-clientabci)
     - [Setting the blockchain endpoint](#setting-the-blockchain-endpoint)
@@ -181,6 +182,26 @@ make reset
 ```
 
 to restore the initial state. Notice that this will delete the databases that store the programs and the records, so previous deployments and account records will be deleted.
+
+### Changing the VM backend
+
+By default, LambdaVM is enabled on the project. In order to change it, you can export/set `VM_BACKEND` or pass it to the `make` commands with `-e`. The following options are valid:
+
+- `snarkvm_backend`: SnarkVM implementation
+- `lambdavm_backend`: Our own Aleo VM implementation (set by default)
+
+Note that because all Rust binaries use the VM, the same backend needs to be set for all of them. Because the blockchain persists data (such as program verifying keys) on disk, it is necessary to run `make reset` as described above before swapping the VM backend. The following example is a valid way to set the backend and start the network.
+
+````sh
+make reset #erases persisted data that might be related to the previously-set backend
+export VM_FEATURE=snarkvm_backend
+make cli #compiles the CLI
+make abci #starts the ABCI
+make node #(on another terminal) start the Tendermint binary
+````
+
+After this, you can run CLI commands appropriately. 
+All other examples in this README can be executed with either backend by setting the correct environment variable. 
 
 ## Other features
 
