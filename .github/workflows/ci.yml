@@ -20,10 +20,10 @@ jobs:
       - run: cargo build --release --features lambdavm_backend
       - run: make reset
       - run: |
-          VM_FEATURE=lambdavm_backend make node  &
-          VM_FEATURE=lambdavm_backend make abci   &
+          VM_FEATURE=lambdavm_backend make node > /dev/null &
+          VM_FEATURE=lambdavm_backend make abci /dev/null &
           while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done
-          cargo test --release --features lambdavm_backend -- --nocapture --test-threads=4 
+          cargo test --release --features lambdavm_backend -- --nocapture --test-threads=1
       - run: pkill make;
              make reset 
       - run: rm -rf ~/.aleo/cache
