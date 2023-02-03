@@ -11,7 +11,6 @@ The consensus/blockchain engine has been built with [Tendermint Core](https://do
 ## Table of Contents  
 
 - [Aleo Lambda Blockchain](#aleo-lambda-blockchain)
-  - [Table of Contents](#table-of-contents)
   - [Project structure](#project-structure)
   - [Example application usage](#example-application-usage)
     - [Sending programs and executions to the blockchain](#sending-programs-and-executions-to-the-blockchain)
