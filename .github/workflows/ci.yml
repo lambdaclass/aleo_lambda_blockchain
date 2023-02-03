@@ -29,8 +29,8 @@ jobs:
       - run: rm -rf ~/.aleo/cache
       - run: cargo build --release --features lambdavm_backend
       - run: |
-          make node VM_FEATURE=snarkvm_backend > /dev/null &
-          make abci VM_FEATURE=snarkvm_backend > /dev/null &
+          VM_FEATURE=snarkvm_backend make node  > /dev/null &
+          VM_FEATURE=snarkvm_backend make abci  > /dev/null &
           while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:26657)" != "200" ]]; do sleep 2; done;
           cargo test --release --features snarkvm_backend -- --nocapture --test-threads=4 
   clippy:
