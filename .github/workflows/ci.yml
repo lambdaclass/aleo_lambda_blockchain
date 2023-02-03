@@ -9,7 +9,6 @@ jobs:
         with:
             toolchain: nightly
             profile: minimal
-            default: true
 # Rust cache temporarily disabled until issue (https://github.com/actions/cache/issues/810) is fixed
 #     - uses: Swatinem/rust-cache@v2
 #       with:
