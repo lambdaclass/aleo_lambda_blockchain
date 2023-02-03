@@ -9,10 +9,11 @@ ARCH=amd64
 endif
 
 TENDERMINT_HOME=~/.tendermint/
+VM_FEATURE ?= lambdavm_backend
 
 # Build the client program and put it in bin/aleo
 cli:
-	mkdir -p bin && cargo build --release && cp target/release/client bin/aleo
+	mkdir -p bin && cargo build --release --features $(VM_FEATURE) && cp target/release/client bin/aleo
 
 # Installs tendermint for current OS and puts it in bin/
 bin/tendermint:
@@ -29,7 +30,7 @@ tendermint_install:
 genesis: bin/tendermint cli
 	test -f $(TENDERMINT_HOME)/account.json || ALEO_HOME=$(TENDERMINT_HOME) bin/aleo account new
 	bin/tendermint init
-	cargo run --bin genesis --release -- $(TENDERMINT_HOME)
+	cargo run --bin genesis --release --features $(VM_FEATURE) -- $(TENDERMINT_HOME)
 
 # Run a tendermint node, installing it if necessary
 node: genesis tendermint_config
@@ -52,7 +53,7 @@ testnet: bin/tendermint cli
 	  ALEO_HOME=$$node bin/aleo account new ; \
           make tendermint_config TENDERMINT_HOME=$$node ; \
 	done
-	cargo run --bin genesis --release -- $(HOMEDIR)/*
+	cargo run --bin genesis --release --features $(VM_FEATURE) -- $(HOMEDIR)/*
 
 # Initialize the tendermint configuration for a localnet of the given amount of validators
 localnet: VALIDATORS:=4
@@ -66,7 +67,7 @@ localnet: bin/tendermint cli
         make localnet_config TENDERMINT_HOME=$(HOMEDIR)/node$$n NODE=$$n VALIDATORS=$(VALIDATORS); \
 		mkdir $(HOMEDIR)/node$$n/abci ; \
 	done
-	cargo run --bin genesis --release -- $(HOMEDIR)/*
+	cargo run --bin genesis --release --features $(VM_FEATURE) -- $(HOMEDIR)/*
 .PHONY: localnet
 
 localnet_config:
@@ -86,7 +87,7 @@ localnet_start: NODE:=0
 localnet_start: HOMEDIR:=localnet
 localnet_start:
 	bin/tendermint node --home ./$(HOMEDIR)/node$(NODE) --consensus.create_empty_blocks_interval="90s" &
-	cd ./$(HOMEDIR)/node$(NODE)/abci; cargo run --release --bin snarkvm_abci -- --port 26$(NODE)58
+	cd ./$(HOMEDIR)/node$(NODE)/abci; cargo run --release --bin snarkvm_abci --features $(VM_FEATURE) -- --port 26$(NODE)58
 .PHONY: localnet_start
 
 # remove the blockchain data
@@ -98,11 +99,12 @@ reset: bin/tendermint
 
 # run the snarkvm tendermint application
 abci:
-	cargo run --release --bin snarkvm_abci
+	cargo run --release --bin snarkvm_abci  --features $(VM_FEATURE)
 
-# run tests on release mode to ensure there is no extra printing to stdout
+# run tests on release mode (default VM backend) to ensure there is no extra printing to stdout
 test:
-	RUST_BACKTRACE=full cargo test --release -- --nocapture --test-threads=4
+	RUST_BACKTRACE=full cargo test --release --features $(VM_FEATURE) -- --nocapture --test-threads=4
+
 
 dockernet-build-abci:
 	docker build -t snarkvm_abci .

@@ -119,7 +119,7 @@ impl Transaction {
             .map(|(commitment, record)| (*commitment, record.clone()))
             .collect();
 
-        #[cfg(feature = "vmtropy_backend")]
+        #[cfg(feature = "lambdavm_backend")]
         return self
             .transitions()
             .iter()
@@ -137,7 +137,7 @@ impl Transaction {
             .flat_map(|transition| transition.serial_numbers().copied())
             .collect();
 
-        #[cfg(feature = "vmtropy_backend")]
+        #[cfg(feature = "lambdavm_backend")]
         return self
             .transitions()
             .iter()
@@ -235,7 +235,7 @@ impl Transaction {
             }
 
             let gates = gates as i64 - implicit_fee;
-            #[cfg(feature = "vmtropy_backend")]
+            #[cfg(feature = "lambdavm_backend")]
             let inputs = [
                 vm::UserInputValueType::Record(crate::vm::Record {
                     owner: record.owner,
@@ -324,8 +324,8 @@ impl Transaction {
                     hasher.update(key.to_string());
                     #[cfg(feature = "snarkvm_backend")]
                     let serialization = serde_json::to_string(&value)?;
-                    #[cfg(feature = "vmtropy_backend")]
-                    let serialization = vmtropy::serialize_verifying_key(value)?;
+                    #[cfg(feature = "lambdavm_backend")]
+                    let serialization = lambdavm::serialize_verifying_key(value)?;
                     hasher.update(serialization);
                 }
 

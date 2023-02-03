@@ -3,32 +3,31 @@
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail, ensure, Result};
+pub use lambdavm::build_program;
+pub use lambdavm::jaleo::{get_credits_key, mint_credits};
+pub use lambdavm::jaleo::{Itertools, UserInputValueType};
+use lambdavm::VariableType;
 use log::debug;
 use sha3::{Digest, Sha3_256};
-pub use vmtropy::build_program;
-pub use vmtropy::jaleo::{get_credits_key, mint_credits};
-pub use vmtropy::jaleo::{Itertools, UserInputValueType};
-use vmtropy::snarkvm::prelude::FromBytes;
-use vmtropy::VariableType;
 
 const MAX_INPUTS: usize = 8;
 const MAX_OUTPUTS: usize = 8;
 
-pub type Address = vmtropy::jaleo::Address;
-pub type Identifier = vmtropy::jaleo::Identifier;
-pub type Program = vmtropy::jaleo::Program;
-pub type ProgramBuild = vmtropy::ProgramBuild;
-pub type Record = vmtropy::jaleo::Record;
-pub type EncryptedRecord = vmtropy::jaleo::EncryptedRecord;
-pub type ViewKey = vmtropy::jaleo::ViewKey;
-pub type PrivateKey = vmtropy::jaleo::PrivateKey;
-pub type Field = vmtropy::jaleo::Field;
-pub type ProgramID = vmtropy::jaleo::ProgramID;
-pub type VerifyingKey = vmtropy::jaleo::VerifyingKey;
-pub type ProvingKey = vmtropy::jaleo::ProvingKey;
-pub type Deployment = vmtropy::jaleo::Deployment;
-pub type Transition = vmtropy::jaleo::Transition;
-pub type VerifyingKeyMap = vmtropy::jaleo::VerifyingKeyMap;
+pub type Address = lambdavm::jaleo::Address;
+pub type Identifier = lambdavm::jaleo::Identifier;
+pub type Program = lambdavm::jaleo::Program;
+pub type ProgramBuild = lambdavm::ProgramBuild;
+pub type Record = lambdavm::jaleo::Record;
+pub type EncryptedRecord = lambdavm::jaleo::EncryptedRecord;
+pub type ViewKey = lambdavm::jaleo::ViewKey;
+pub type PrivateKey = lambdavm::jaleo::PrivateKey;
+pub type Field = lambdavm::jaleo::Field;
+pub type ProgramID = lambdavm::jaleo::ProgramID;
+pub type VerifyingKey = lambdavm::jaleo::VerifyingKey;
+pub type ProvingKey = lambdavm::jaleo::ProvingKey;
+pub type Deployment = lambdavm::jaleo::Deployment;
+pub type Transition = lambdavm::jaleo::Transition;
+pub type VerifyingKeyMap = lambdavm::jaleo::VerifyingKeyMap;
 
 /// Basic deployment validations
 pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> Result<()> {
@@ -138,20 +137,20 @@ pub fn verify_execution(
     let proof_bytes = hex::decode(&transition.proof)?;
 
     // TODO: Fix this by making proofs derive the deserialize trait instead of this.
-    let proof = vmtropy::jaleo::deserialize_proof(proof_bytes)?;
+    let proof = lambdavm::jaleo::deserialize_proof(proof_bytes)?;
 
     let inputs: Vec<UserInputValueType> = transition
         .inputs
         .iter()
         .filter_map(|i| match i {
-            vmtropy::VariableType::Public(value) => Some(value.clone()),
+            lambdavm::VariableType::Public(value) => Some(value.clone()),
             _ => None,
         })
         .collect();
 
     // Ensure the proof is valid.
     ensure!(
-        vmtropy::verify_proof(verifying_key.clone(), &inputs, &proof)?,
+        lambdavm::verify_proof(verifying_key.clone(), &inputs, &proof)?,
         "Transition is invalid"
     );
 
@@ -190,16 +189,17 @@ pub fn execution(
         .map_err(|e| anyhow!("{}", e))?;
 
     let (compiled_function_variables, proof) =
-        vmtropy::execute_function(&program, &function_name.to_string(), inputs)?;
+        lambdavm::execute_function(&program, &function_name.to_string(), inputs)?;
 
-    let inputs = vmtropy::jaleo::process_circuit_inputs(
+    let inputs = lambdavm::jaleo::process_circuit_inputs(
         &function,
         &compiled_function_variables,
         private_key,
     )?;
-    let outputs = vmtropy::jaleo::process_circuit_outputs(&function, &compiled_function_variables)?;
+    let outputs =
+        lambdavm::jaleo::process_circuit_outputs(&function, &compiled_function_variables)?;
 
-    let bytes_proof = vmtropy::jaleo::serialize_proof(proof)?;
+    let bytes_proof = lambdavm::jaleo::serialize_proof(proof)?;
     let encoded_proof = hex::encode(bytes_proof);
 
     let transition = Transition {
@@ -278,12 +278,14 @@ where
 // same as above
 pub fn address_from_output(output: &VariableType) -> Result<Address> {
     if let VariableType::Public(UserInputValueType::Address(address)) = output {
-        let address = Address::from_bytes_le(address)?;
+        let address_string = std::str::from_utf8(address)?;
+        let address = Address::from_str(address_string)?;
         return Ok(address);
     };
 
     if let VariableType::Private(UserInputValueType::Address(address)) = output {
-        let address = Address::from_str(&String::from_utf8(address.to_vec())?)?;
+        let address_string = std::str::from_utf8(address)?;
+        let address = Address::from_str(address_string)?;
         return Ok(address);
     };
 

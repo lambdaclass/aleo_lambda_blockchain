@@ -648,7 +648,7 @@ mod tests {
                 let decrypted = record.decrypt(&owner.0).unwrap();
                 #[cfg(feature = "snarkvm_backend")]
                 let gates = ***decrypted.gates();
-                #[cfg(feature = "vmtropy_backend")]
+                #[cfg(feature = "lambdavm_backend")]
                 let gates = decrypted.gates;
                 acc + gates
             })

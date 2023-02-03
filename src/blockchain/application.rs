@@ -540,7 +540,7 @@ mod tests {
 
         let transaction_json = json!(transaction);
 
-        #[cfg(feature = "vmtropy_backend")]
+        #[cfg(feature = "lambdavm_backend")]
         let pointer_path = "/Execution/transitions/0/outputs/0/EncryptedRecord/1/ciphertext";
         #[cfg(feature = "snarkvm_backend")]
         let pointer_path = "/Execution/transitions/0/outputs/0/value";
