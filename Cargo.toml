@@ -96,9 +96,13 @@ ctor = "0.1.23"
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 #default = ["lambdavm_backend"]
 >>>>>>> a11113a (remove defaults)
+=======
+default = ["lambdavm_backend"]
+>>>>>>> ee57fcc (update srs file creation)
 #default = ["snarkvm_backend"]
 #default = ["vmtropy_backend"]
 =======

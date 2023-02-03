@@ -65,6 +65,14 @@ pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> 
     Ok(())
 }
 
+pub fn ensure_srs_file_exists() -> Result<()> {
+    let (_, srs_file_path) = lambdavm::universal_srs::get_universal_srs_dir_and_filepath()?;
+    if let Err(_) = std::fs::File::open(srs_file_path) {
+        let _ = lambdavm::universal_srs::generate_universal_srs_and_write_to_file()?;
+    }
+    Ok(())
+}
+
 pub fn verify_execution(
     transition: &Transition,
     verifying_key_map: &VerifyingKeyMap,

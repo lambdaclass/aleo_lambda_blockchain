@@ -17,6 +17,12 @@ pub fn aleo_home() -> PathBuf {
 /// functions to move aleo money. Since it's required for most uses in clients and servers, it's
 /// cached to only be built once.
 pub fn load_credits() -> (vm::Program, vm::ProgramBuild) {
+    // TODO: move this to lambdaVM-specific module or to the crate
+    // currently, lambda VM does not check whether the params are created on disk before using them
+    // so if they do not exist, make sure they are generated
+    #[cfg(feature = "lambdavm_backend")]
+    let _ = vm::ensure_srs_file_exists().expect("Error reading or creating Universal SRS file");
+
     // try to fetch from cache
     let cache_path = aleo_home().join("cache/credits.avm");
     if let Ok(program) = program_file::ProgramFile::load(&cache_path) {
