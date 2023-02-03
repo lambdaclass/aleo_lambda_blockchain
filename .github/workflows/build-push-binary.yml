@@ -1,11 +1,11 @@
-name: Build and push snarkvm_abci binary
+name: Build and push aleo_abci binary
 on:
   push:
     branches:
       - main
 jobs:
   build-binary:
-    name: Build and push snarkvm_abci binary
+    name: Build and push aleo_abci binary
 
     runs-on: [self-hosted, nomad]
     steps:
@@ -15,15 +15,15 @@ jobs:
             toolchain: nightly
             profile: minimal
 
-      - name: Build snarkvm_abci
+      - name: Build aleo_abci
         run: cargo build --release
 
       - name: Compress and upload binary to S3
         run: |
           cd target/release/
-          COMPRESSED_FILE=snarkvm_abci-$(TZ=America/Buenos_Aires date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD).tgz
-          tar -cz snarkvm_abci -f ${COMPRESSED_FILE}
-          aws s3 cp ${COMPRESSED_FILE} s3://entropy-releases/snarkvm_abci/${COMPRESSED_FILE}
+          COMPRESSED_FILE=aleo_abci-$(TZ=America/Buenos_Aires date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD).tgz
+          tar -cz aleo_abci -f ${COMPRESSED_FILE}
+          aws s3 cp ${COMPRESSED_FILE} s3://entropy-releases/aleo_abci/${COMPRESSED_FILE}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

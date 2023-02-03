@@ -25,7 +25,7 @@ path = "src/blockchain/genesis.rs"
 test = false
 
 [[bin]]
-name = "snarkvm_abci"
+name = "aleo_abci"
 path = "src/blockchain/main.rs"
 
 [dependencies]
@@ -84,7 +84,7 @@ serial_test = "1.0.0"
 ctor = "0.1.23"
 
 [features]
-#default = ["lambdavm_backend"]
+default = ["lambdavm_backend"]
 #default = ["snarkvm_backend"]
 snarkvm_backend = ["snarkvm"]
 lambdavm_backend =  ["lambdavm"]
