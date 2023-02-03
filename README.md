@@ -190,10 +190,11 @@ By default, LambdaVM is enabled on the project. In order to change it, you can e
 - `snarkvm_backend`: SnarkVM implementation
 - `lambdavm_backend`: Our own Aleo VM implementation (set by default)
 
-Note that because all Rust binaries use the VM, the same backend needs to be set for all of them. Because the blockchain persists data (such as program verifying keys) on disk, it is necessary to run `make reset` as described above before swapping the VM backend. The following example is a valid way to set the backend and start the network.
+Note that because all Rust binaries use the VM, the same backend needs to be set for all of them. Because the blockchain persists data (such as program verifying keys and record-related data) on disk, it is necessary to run `make reset` as described above before swapping the VM backend. Furthermore, the `credits` program's keys are cached on disk in the directory `~/.aleo/cache`, so you need to remove this directory because verifying keys are not compatible across the VM backends.  The following example is a valid way to set the backend and start the network.
 
 ````sh
-make reset #erases persisted data that might be related to the previously-set backend
+make reset #erases blockchain-related persisted data (records and deployed programs) that might be related to the previously-set backend
+rm -rf ~/.aleo/cache #remove cached credits program used by CLI and blockchain
 export VM_FEATURE=snarkvm_backend
 make cli #compiles the CLI
 make abci #starts the ABCI
