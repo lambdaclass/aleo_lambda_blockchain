@@ -9,11 +9,11 @@ ARCH=amd64
 endif
 
 TENDERMINT_HOME=~/.tendermint/
-VM_FEATURE=snarkvm_backend
+VM_FEATURE ?= lambdavm_backend
 
 # Build the client program and put it in bin/aleo
 cli:
-	mkdir -p bin && cargo build --release --features $(VM_FEATURE) && cp target/release/client bin/aleo
+	mkdir -p bin && cargo build --release --features $(VM_FEATURE) --features $(VM_FEATURE) && cp target/release/client bin/aleo
 
 # Installs tendermint for current OS and puts it in bin/
 bin/tendermint:
@@ -101,8 +101,7 @@ reset: bin/tendermint
 abci:
 	cargo run --release --bin snarkvm_abci  --features $(VM_FEATURE)
 
-# run tests on release mode (default VM backend) to ensure there is no extra printing to stdout
-test: FEATURE:=snarkvm_abci
+# run tests on release mode to ensure there is no extra printing to stdout
 test:
 	RUST_BACKTRACE=full cargo test --release --features $(VM_FEATURE) -- --nocapture --test-threads=4
 

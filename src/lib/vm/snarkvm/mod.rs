@@ -41,7 +41,7 @@ pub type Deployment = snarkvm::prelude::Deployment<Testnet3>;
 pub type Transition = snarkvm::prelude::Transition<Testnet3>;
 
 /// These structs are nothing more than a wrapper around the actual IndexMap that is used
-/// for the verifying keys map. Why does it exist? The problem comes from the vmtropy backend.
+/// for the verifying keys map. Why does it exist? The problem comes from the lambdavm backend.
 /// Arkworks' verifying keys do not implement the regular `Serialize`/`Deserialize` traits,
 /// as they use their own custom `CanonicalSerialize`/`CanonicalDeserialize` ones. To implement
 /// the regular `Serialize`/`Deserialize` traits, we wrapped the IndexMap around this struct.
