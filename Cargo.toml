@@ -95,6 +95,10 @@ ctor = "0.1.23"
 [features]
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+#default = ["lambdavm_backend"]
+>>>>>>> a11113a (remove defaults)
 #default = ["snarkvm_backend"]
 #default = ["vmtropy_backend"]
 =======
