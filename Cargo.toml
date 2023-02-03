@@ -65,8 +65,12 @@ cfg-if = "1"
 git = "https://github.com/lambdaclass/aleo_lambda_vm.git"
 =======
 [dependencies.lambdavm]
+<<<<<<< HEAD
 git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
 >>>>>>> 1adbbac (Use `LambdaVM` instead of `VMTropy` after rename (#6))
+=======
+git = "https://github.com/lambdaclass/aleo_lambda_vm.git"
+>>>>>>> 55d8b48 (remove ssh requirement)
 branch = "main"
 optional = true
 
