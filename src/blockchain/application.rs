@@ -103,8 +103,7 @@ impl Application for SnarkVMApp {
                 self.records.get_merkle_path(ciphertext).map(|path| {
                     let mut bytes = Vec::new();
 
-                    path
-                        .serialize(&mut bytes)
+                    path.serialize(&mut bytes)
                         .expect("Error serializing merkle path");
                     bytes
                 })
