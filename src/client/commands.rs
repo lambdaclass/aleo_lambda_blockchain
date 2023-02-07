@@ -2,6 +2,7 @@ use crate::{account, tendermint};
 use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use itertools::Itertools;
+
 use lib::program_file::ProgramFile;
 use lib::query::AbciQuery;
 use lib::transaction::Transaction;
@@ -10,6 +11,8 @@ use lib::vm::{self, compute_serial_number};
 use lib::vm::{EncryptedRecord, ProgramID};
 use log::debug;
 use serde_json::json;
+
+use simpleworks::merkle_tree::simple_merkle_tree::{CanonicalDeserialize, SimplePath};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
@@ -241,6 +244,20 @@ impl Command {
                         Some(program) => program,
                         None => bail!("Could not find program {}", program),
                     };
+
+                    for input in &inputs {
+                        if let vm::UserInputValueType::Record(r) = input {
+                            let path =
+                                get_records_merkle_paths(r.commitment().unwrap(), &url).await?;
+                            println!(
+                                "Retrieved merkle path from node {:?} in leaf {}",
+                                path.auth_path, path.leaf_index
+                            );
+                            // TODO: generate proof with merkle path,
+                            // attach proof to transaction
+                        }
+                    }
+
                     let transaction = Transaction::execution(
                         program,
                         function,
@@ -468,6 +485,15 @@ async fn get_records(
         })
         .collect();
     Ok(records)
+}
+
+/// Retrieves input records' merkle paths
+async fn get_records_merkle_paths(ciphertext: vm::Field, url: &str) -> Result<SimplePath> {
+    let get_merkle_paths_response =
+        tendermint::query(AbciQuery::GetMerklePath { ciphertext }.into(), url).await?;
+    let paths: SimplePath = CanonicalDeserialize::deserialize(&*get_merkle_paths_response)?;
+
+    Ok(paths)
 }
 
 /// Given a desired amount of fee to pay, find the record on this account with the biggest

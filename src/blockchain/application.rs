@@ -8,6 +8,7 @@ use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
 use lib::validator::GenesisState;
 use lib::{query::AbciQuery, transaction::Transaction, vm};
+use simpleworks::merkle_tree::simple_merkle_tree::CanonicalSerialize;
 use tendermint_abci::Application;
 use tendermint_proto::abci;
 
@@ -84,7 +85,6 @@ impl Application for SnarkVMApp {
             }
             Ok(AbciQuery::GetSpentSerialNumbers) => {
                 debug!("Fetching spent records's serial numbers");
-
                 self.records
                     .scan_spent()
                     .map(|result| bincode::serialize(&result).unwrap())
@@ -93,6 +93,20 @@ impl Application for SnarkVMApp {
                 debug!("Fetching {}", program_id);
                 self.programs.get(&program_id).map(|result| {
                     bincode::serialize(&result.map(|(program, _keys)| program)).unwrap()
+                })
+            }
+            Ok(AbciQuery::GetMerklePath { ciphertext }) => {
+                debug!(
+                    "Attempt to retrieve a merkle path to ciphertext {:?}",
+                    ciphertext
+                );
+                self.records.get_merkle_path(ciphertext).map(|path| {
+                    let mut bytes = Vec::new();
+
+                    path
+                        .serialize(&mut bytes)
+                        .expect("Error serializing merkle path");
+                    bytes
                 })
             }
             Err(e) => Err(e.into()),

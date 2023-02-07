@@ -40,6 +40,7 @@ rand = "0.8.5"
 serde = "1.0"
 serde_json = { version = "1.0", features = ["raw_value"] }
 simple_logger = "2.3.0"
+simpleworks = { path="../simpleworks" }
 tendermint = "0.25.0"
 tendermint-abci = "0.25.0"
 tendermint-proto = { version = "0.25.0", default-features = false }
@@ -61,7 +62,12 @@ sha3 = "0.10.6"
 cfg-if = "1"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 [dependencies.vmtropy]
+=======
+
+[dependencies.lambdavm]
+>>>>>>> dbbdd78 (wiring each part)
 git = "https://github.com/lambdaclass/aleo_lambda_vm.git"
 =======
 [dependencies.lambdavm]
@@ -98,6 +104,7 @@ ctor = "0.1.23"
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 #default = ["lambdavm_backend"]
 >>>>>>> a11113a (remove defaults)
@@ -107,6 +114,9 @@ default = ["lambdavm_backend"]
 =======
 #default = ["lambdavm_backend"]
 >>>>>>> e985622 (remove default featuresn)
+=======
+default = ["lambdavm_backend"]
+>>>>>>> dbbdd78 (wiring each part)
 #default = ["snarkvm_backend"]
 #default = ["vmtropy_backend"]
 =======

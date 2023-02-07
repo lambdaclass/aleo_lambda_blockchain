@@ -34,7 +34,7 @@ genesis: bin/tendermint cli
 
 # Run a tendermint node, installing it if necessary
 node: genesis tendermint_config
-	bin/tendermint node --consensus.create_empty_blocks_interval="8s"
+	bin/tendermint node --consensus.create_empty_blocks_interval="80s"
 
 # Override a tendermint node's default configuration. NOTE: we should do something more declarative if we need to update more settings.
 tendermint_config:
