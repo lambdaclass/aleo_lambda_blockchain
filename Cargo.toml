@@ -61,22 +61,9 @@ base64 = "0.20.0"
 sha3 = "0.10.6"
 cfg-if = "1"
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-[dependencies.vmtropy]
-=======
 
 [dependencies.lambdavm]
->>>>>>> dbbdd78 (wiring each part)
 git = "https://github.com/lambdaclass/aleo_lambda_vm.git"
-=======
-[dependencies.lambdavm]
-<<<<<<< HEAD
-git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
->>>>>>> 1adbbac (Use `LambdaVM` instead of `VMTropy` after rename (#6))
-=======
-git = "https://github.com/lambdaclass/aleo_lambda_vm.git"
->>>>>>> 55d8b48 (remove ssh requirement)
 branch = "main"
 optional = true
 
@@ -89,7 +76,6 @@ optional = true
 [profile.bench]
 debug = true
 
-
 [dev-dependencies]
 assert_fs = "1.0.9"
 snarkvm = { git = "https://github.com/Lambdaclass/snarkVM.git", branch = "entropy_fork" } # used for creating records in tests
@@ -99,32 +85,7 @@ serial_test = "1.0.0"
 ctor = "0.1.23"
 
 [features]
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
 #default = ["lambdavm_backend"]
->>>>>>> a11113a (remove defaults)
-=======
-default = ["lambdavm_backend"]
->>>>>>> ee57fcc (update srs file creation)
-=======
-#default = ["lambdavm_backend"]
->>>>>>> e985622 (remove default featuresn)
-=======
-default = ["lambdavm_backend"]
->>>>>>> dbbdd78 (wiring each part)
-#default = ["snarkvm_backend"]
-#default = ["vmtropy_backend"]
-=======
-#default = ["lambdavm_backend"]
-=======
-default = ["lambdavm_backend"]
->>>>>>> 815924c (change ABCI binary name)
-#default = ["snarkvm_backend"]
->>>>>>> 1adbbac (Use `LambdaVM` instead of `VMTropy` after rename (#6))
+default = ["snarkvm_backend"]
 snarkvm_backend = ["snarkvm"]
 lambdavm_backend =  ["lambdavm"]
