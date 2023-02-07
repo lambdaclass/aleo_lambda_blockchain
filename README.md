@@ -231,7 +231,7 @@ make localnet VALIDATORS={N}
 
 Will create one specific directory for the configuration of N (default 4, max 10) nodes under directory `localnet`	
 
-For each node it will create `config` and `data` directories to support tendermint function, and an `abci` directory to allow each `snarkvm_abci` instance run in its own directory.	
+For each node it will create `config` and `data` directories to support tendermint function, and an `abci` directory to allow each `aleo_abci` instance run in its own directory.	
 
 For each node it will assign a different set of ports for the tendermint and abci processes: For node N, the used ports will be 26{N}56, 26{N}57 and 26{n}58. Eg. for node 0 the ports will be 26056, 26057 and 26058.	
 
@@ -244,7 +244,7 @@ To start each node run in different terminals:
 make localnet_start NODE={N}	
 ```	
 
-This will start the `tendermint` process as well as the `snarkvm_abci` process in the same terminal (So logs can be a bit messy)	
+This will start the `tendermint` process as well as the `aleo_abci` process in the same terminal (So logs can be a bit messy)	
 
 Once all the nodes are started the network will be ready to interact.	
 
@@ -266,7 +266,7 @@ To stop the localnet, `Ctrl+C` on each node terminal should end both the `abci` 
 
 This requires having docker (with docker-compose) installed.
 
-Then build the `snarkvm_abci` image:
+Then build the `aleo_abci` image:
 
 ```shell
 make localnet-build-abci
@@ -288,7 +288,7 @@ The configuration mounts some volumes in the `testnet/node{_}/` directories, and
 make localnet-reset
 ```
 
-or delete all the `node{_}` dirs to remove local `snarkvm_abci` data (it will require to download all the parameters on next run).
+or delete all the `node{_}` dirs to remove local `aleo_abci` data (it will require to download all the parameters on next run).
 
 You will find an `account.json` file in each `testnet/node{_}/` directory, with the aleo credentials of the validators (usable to run commands with the credits of the validators). On a MacOS docker deploy, each of the 4 testnet nodes will be exposed on ports 26657, 26660, 26663, 26666 of localhost.
 
@@ -300,7 +300,7 @@ ALEO_HOME=testnet/node1/ bin/aleo --url http://127.0.0.1:26657 account balance
 
 This requires having docker (with docker-compose) installed.
 
-Then build the `snarkvm_abci` image:
+Then build the `aleo_abci` image:
 
 ```
 make dockernet-build-abci
@@ -322,7 +322,7 @@ The configuration mounts some volumes in the `dockernet/node{_}/` directories, a
 make dockernet-reset
 ```
 
-or delete all the `node{_}` dirs to remove local `snarkvm_abci` data (it will require to download all the parameters on next run).
+or delete all the `node{_}` dirs to remove local `aleo_abci` data (it will require to download all the parameters on next run).
 
 You will find an `account.json` file in each `dockernet/node{_}/` directory, with the aleo credentials of the validators (usable to run commands with the credits of the validators). On a MacOS docker deploy, each of the 4 testnet nodes will be exposed on ports 26657, 26660, 26663, 26666 of localhost.
 

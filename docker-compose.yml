@@ -67,56 +67,56 @@ services:
 
   abci0:
     container_name: abci0
-    image: "snarkvm_abci"
+    image: "aleo_abci"
     expose:
       - "26658"
     volumes:
       - ./testnet/node0/root:/root:Z
       - ~/.aleo/resources:/root/.aleo/resources:Z
       - ~/.aleo/cache:/root/.aleo/cache:Z
-    command: "/target/release/snarkvm_abci --host 192.167.10.6 --verbose"
+    command: "/target/release/aleo_abci --host 192.167.10.6 --verbose"
     networks:
       localnet:
         ipv4_address: 192.167.10.6
 
   abci1:
     container_name: abci1
-    image: "snarkvm_abci"
+    image: "aleo_abci"
     expose:
       - "26658"
     volumes:
       - ./testnet/node1/root:/root:Z
       - ~/.aleo/resources:/root/.aleo/resources:Z
       - ~/.aleo/cache:/root/.aleo/cache:Z
-    command: "/target/release/snarkvm_abci --host 192.167.10.7"
+    command: "/target/release/aleo_abci --host 192.167.10.7"
     networks:
       localnet:
         ipv4_address: 192.167.10.7
 
   abci2:
     container_name: abci2
-    image: "snarkvm_abci"
+    image: "aleo_abci"
     expose:
       - "26658"
     volumes:
       - ./testnet/node2/root:/root:Z
       - ~/.aleo/resources:/root/.aleo/resources:Z
       - ~/.aleo/cache:/root/.aleo/cache:Z
-    command: "/target/release/snarkvm_abci --host 192.167.10.8"
+    command: "/target/release/aleo_abci --host 192.167.10.8"
     networks:
       localnet:
         ipv4_address: 192.167.10.8
 
   abci3:
     container_name: abci3
-    image: "snarkvm_abci"
+    image: "aleo_abci"
     expose:
       - "26658"
     volumes:
       - ./testnet/node3/root:/root:Z
       - ~/.aleo/resources:/root/.aleo/resources:Z
       - ~/.aleo/cache:/root/.aleo/cache:Z
-    command: "/target/release/snarkvm_abci --host 192.167.10.9"
+    command: "/target/release/aleo_abci --host 192.167.10.9"
     networks:
       localnet:
         ipv4_address: 192.167.10.9

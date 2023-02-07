@@ -25,7 +25,7 @@ path = "src/blockchain/genesis.rs"
 test = false
 
 [[bin]]
-name = "snarkvm_abci"
+name = "aleo_abci"
 path = "src/blockchain/main.rs"
 
 [dependencies]
@@ -59,10 +59,9 @@ sha2 = "0.10.6"
 base64 = "0.20.0"
 sha3 = "0.10.6"
 cfg-if = "1"
-serial_test = "*"
 
 [dependencies.lambdavm]
-git = "ssh://git@github.com/lambdaclass/aleo_lambda_vm.git"
+git = "https://github.com/lambdaclass/aleo_lambda_vm.git"
 branch = "main"
 optional = true
 
@@ -72,11 +71,16 @@ branch = "entropy_fork"
 features = ["circuit", "console", "parallel", "parameters"]
 optional = true
 
+[profile.bench]
+debug = true
+
+
 [dev-dependencies]
 assert_fs = "1.0.9"
 snarkvm = { git = "https://github.com/Lambdaclass/snarkVM.git", branch = "entropy_fork" } # used for creating records in tests
 assert_cmd = "2.0.6"
 retry = "2.0.0"
+serial_test = "1.0.0"
 ctor = "0.1.23"
 
 [features]

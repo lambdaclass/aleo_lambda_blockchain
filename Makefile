@@ -87,7 +87,7 @@ localnet_start: NODE:=0
 localnet_start: HOMEDIR:=localnet
 localnet_start:
 	bin/tendermint node --home ./$(HOMEDIR)/node$(NODE) --consensus.create_empty_blocks_interval="90s" &
-	cd ./$(HOMEDIR)/node$(NODE)/abci; cargo run --release --bin snarkvm_abci --features $(VM_FEATURE) -- --port 26$(NODE)58
+	cd ./$(HOMEDIR)/node$(NODE)/abci; cargo run --release --bin aleo_abci --features $(VM_FEATURE) -- --port 26$(NODE)58
 .PHONY: localnet_start
 
 # remove the blockchain data
@@ -99,7 +99,7 @@ reset: bin/tendermint
 
 # run the snarkvm tendermint application
 abci:
-	cargo run --release --bin snarkvm_abci  --features $(VM_FEATURE)
+	cargo run --release --bin aleo_abci  --features $(VM_FEATURE)
 
 # run tests on release mode (default VM backend) to ensure there is no extra printing to stdout
 test:
@@ -107,7 +107,7 @@ test:
 
 
 dockernet-build-abci:
-	docker build -t snarkvm_abci .
+	docker build -t aleo_abci .
 .PHONY: dockernet-build-abci
 
 # Run a 4-node testnet locally
