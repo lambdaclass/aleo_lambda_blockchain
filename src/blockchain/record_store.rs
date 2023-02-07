@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use lib::vm::{self, EncryptedRecord, Field};
 use log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
+use simpleworks::marlin::MarlinInst;
 use simpleworks::merkle_tree::merkle_tree::MerkleConfig;
 use simpleworks::merkle_tree::simple_merkle_tree::{Path, SimpleMerkleTree};
 use std::collections::{HashMap, HashSet};
@@ -73,12 +74,17 @@ impl RecordStore {
 
         thread::spawn(move || {
             while let Ok(command) = command_receiver.recv() {
-                let leaves = [0u128; 8];
-                let srs = lambdavm::universal_srs::load_universal_srs_from_file()
-                    .expect("Error reading SRS file");
-                let rng = simpleworks::marlin::generate_rand();
-                let mut merkle_tree = SimpleMerkleTree::with_srs(&leaves, &srs, rng)
-                    .expect("Error creating merkle tree");
+                //let leaves = [0u8; 8];
+                //let srs = lambdavm::universal_srs::load_universal_srs_from_file()
+                //    .expect("Error reading SRS file");
+
+                //let mut rng = simpleworks::marlin::generate_rand();
+                //let universal_srs = MarlinInst::universal_setup(100_000, 25_000, 300_000, &mut rng)
+                //    .map_err(|e| anyhow!("{:?}", e)).unwrap();
+
+                let mut merkle_tree =
+                    SimpleMerkleTree::new(&[1_u8, 2_u8, 3_u8, 10_u8, 9_u8, 17_u8, 70_u8, 45_u8])
+                        .unwrap();
                 // merkle_tree.tree.generate_proof(index)
                 let mut current_leaf_number: u128 = 0;
 
