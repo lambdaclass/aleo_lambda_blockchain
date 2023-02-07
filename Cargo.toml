@@ -40,6 +40,7 @@ rand = "0.8.5"
 serde = "1.0"
 serde_json = { version = "1.0", features = ["raw_value"] }
 simple_logger = "2.3.0"
+simpleworks = { path="../simpleworks" }
 tendermint = "0.25.0"
 tendermint-abci = "0.25.0"
 tendermint-proto = { version = "0.25.0", default-features = false }
@@ -73,7 +74,6 @@ optional = true
 
 [profile.bench]
 debug = true
-
 
 [dev-dependencies]
 assert_fs = "1.0.9"

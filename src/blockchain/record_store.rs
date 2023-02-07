@@ -2,6 +2,9 @@ use anyhow::{anyhow, Result};
 use lib::vm::{self, EncryptedRecord, Field};
 use log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
+use simpleworks::marlin::MarlinInst;
+use simpleworks::merkle_tree::merkle_tree::MerkleConfig;
+use simpleworks::merkle_tree::simple_merkle_tree::{Path, SimpleMerkleTree};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
@@ -44,6 +47,7 @@ enum Command {
         limit: Option<usize>,
         reply_sender: SyncSender<ScanReply>,
     },
+    GetMerklePath(Commitment, SyncSender<Option<Path<MerkleConfig>>>),
 }
 
 impl RecordStore {
@@ -70,8 +74,22 @@ impl RecordStore {
 
         thread::spawn(move || {
             while let Ok(command) = command_receiver.recv() {
+                //let leaves = [0u8; 8];
+                //let srs = lambdavm::universal_srs::load_universal_srs_from_file()
+                //    .expect("Error reading SRS file");
+
+                //let mut rng = simpleworks::marlin::generate_rand();
+                //let universal_srs = MarlinInst::universal_setup(100_000, 25_000, 300_000, &mut rng)
+                //    .map_err(|e| anyhow!("{:?}", e)).unwrap();
+
+                let mut merkle_tree =
+                    SimpleMerkleTree::new(&[1_u8, 2_u8, 3_u8, 10_u8, 9_u8, 17_u8, 70_u8, 45_u8])
+                        .unwrap();
+                // merkle_tree.tree.generate_proof(index)
+                let mut current_leaf_number: u128 = 0;
+
                 match command {
-                    Command::Add(commitment, ciphertext, reply_to) => {
+                    Command::Add(commitment, _ciphertext, reply_to) => {
                         // TODO: Remove/change this into something secure (merkle path to valid records exists)
                         // Because tracking existence and spent status leads to security concerns, existence of records will
                         // have to be proven by the execution. Until this is implemented, return Ok by default here and assume the record exists.
@@ -83,7 +101,9 @@ impl RecordStore {
                                 String::from_utf8_lossy(&commitment)
                             ))
                         } else {
-                            record_buffer.insert(commitment, ciphertext);
+                            record_buffer.insert(commitment, current_leaf_number);
+                            current_leaf_number += 1;
+
                             Ok(())
                         };
                         reply_to.send(result).unwrap_or_else(|e| error!("{}", e));
@@ -113,8 +133,14 @@ impl RecordStore {
                         // add new records to store
                         let mut batch = WriteBatch::default();
                         for (key, value) in record_buffer.iter() {
-                            batch.put(key, value);
+                            batch.put(key, (*value).to_be_bytes());
+
+                            merkle_tree
+                                .tree
+                                .update(*value as usize, &key)
+                                .unwrap_or_else(|e| error!("{}", e));
                         }
+
                         db_records
                             .write(batch)
                             .unwrap_or_else(|e| error!("failed to write to db {}", e));
@@ -172,6 +198,17 @@ impl RecordStore {
                         reply_sender
                             .send(spent_records)
                             .unwrap_or_else(|e| error!("{}", e));
+                    }
+                    Command::GetMerklePath(record, reply_to) => {
+                        let leaf_index = db_records
+                            .get(record)
+                            .unwrap_or(None)
+                            .map(|value| bincode::deserialize::<u128>(&value).unwrap());
+
+                        let result = leaf_index
+                            .map(|index| merkle_tree.get_merkle_path(index as usize).unwrap());
+
+                        reply_to.send(result).unwrap_or_else(|e| error!("{}", e));
                     }
                 };
             }
@@ -257,6 +294,16 @@ impl RecordStore {
 
         let results = reply_receiver.recv()?;
         Ok(results)
+    }
+
+    pub fn get_merkle_path(&self, record: Commitment) -> Result<Path<MerkleConfig>> {
+        let (reply_sender, reply_receiver) = sync_channel(0);
+
+        self.command_sender
+            .send(Command::GetMerklePath(record, reply_sender))?;
+
+        let results = reply_receiver.recv()?;
+        results.ok_or(anyhow!("Record commitment does not exist"))
     }
 }
 
