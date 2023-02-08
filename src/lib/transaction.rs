@@ -1,5 +1,6 @@
 use crate::load_credits;
 use crate::validator;
+use crate::vm::Signature;
 use crate::vm::{self, VerifyingKeyMap};
 use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
@@ -21,6 +22,7 @@ pub enum Transaction {
     Execution {
         id: String,
         transitions: Vec<vm::Transition>,
+        signature: Option<Signature>,
     },
 }
 
@@ -76,6 +78,7 @@ impl Transaction {
         Self::Execution {
             id: "not known yet".to_string(),
             transitions,
+            signature: None,
         }
         .set_hashed_id()
     }
@@ -99,6 +102,7 @@ impl Transaction {
         Self::Execution {
             id: "not known yet".to_string(),
             transitions,
+            signature: None,
         }
         .set_hashed_id()
     }
@@ -336,6 +340,7 @@ impl Transaction {
             Transaction::Execution {
                 id: _id,
                 transitions,
+                signature: _,
             } => {
                 for transition in transitions.iter() {
                     hasher.update(serde_json::to_string(transition)?);
@@ -410,7 +415,11 @@ impl std::fmt::Display for Transaction {
             Transaction::Deployment { id, program, .. } => {
                 write!(f, "Deployment({},{})", id, program.id())
             }
-            Transaction::Execution { id, transitions } => {
+            Transaction::Execution {
+                id,
+                transitions,
+                signature: _,
+            } => {
                 let transition = transitions.first().unwrap();
                 write!(f, "Execution({},{id})", transition.program_id())
             }
