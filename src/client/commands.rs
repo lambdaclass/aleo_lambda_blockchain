@@ -251,20 +251,9 @@ impl Command {
 
                     let mut transaction_json = json!(transaction);
                     if !dry_run {
-                        let mut transaction_json = json!(transaction);
-                        if !dry_run {
-                            let transaction_serialized = bincode::serialize(&transaction).unwrap();
-                            tendermint::broadcast(transaction_serialized, &url).await?;
-                        } else {
-                            let records = Self::decrypt_records(&transaction, credentials);
-
-                            if !records.is_empty() {
-                                transaction_json
-                                    .as_object_mut()
-                                    .unwrap()
-                                    .insert("decrypted_records".to_string(), json!(records));
-                            }
-                        }
+                        let transaction_serialized = bincode::serialize(&transaction).unwrap();
+                        // TODO Sign transaction.
+                        tendermint::broadcast(transaction_serialized, &url).await?;
                     } else {
                         let records = Self::decrypt_records(&transaction, credentials);
 

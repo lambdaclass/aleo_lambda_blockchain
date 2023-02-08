@@ -28,6 +28,7 @@ pub type ProvingKey = lambdavm::jaleo::ProvingKey;
 pub type Deployment = lambdavm::jaleo::Deployment;
 pub type Transition = lambdavm::jaleo::Transition;
 pub type VerifyingKeyMap = lambdavm::jaleo::VerifyingKeyMap;
+pub type Signature = lambdavm::jaleo::Signature;
 
 /// Basic deployment validations
 pub fn verify_deployment(program: &Program, verifying_keys: VerifyingKeyMap) -> Result<()> {
@@ -155,6 +156,8 @@ pub fn verify_execution(
             _ => None,
         })
         .collect();
+    
+    // TODO ensure signature is correct
 
     // Ensure the proof is valid.
     ensure!(
