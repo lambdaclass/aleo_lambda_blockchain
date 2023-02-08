@@ -22,6 +22,7 @@ pub enum Transaction {
     Execution {
         id: String,
         transitions: Vec<vm::Transition>,
+        // FIXME something's wrong with deserialize and serialize of Signature
         signature: Option<Signature>,
     },
 }
